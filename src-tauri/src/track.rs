@@ -1,0 +1,433 @@
+//! 单轨执行与合并：网络错误分类、自动重试（断点续传）、ffmpeg 合并。
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
+
+use tauri::AppHandle;
+use tokio::io::BufReader;
+use tokio::process::Command;
+
+use crate::downloader::find_ffmpeg;
+use crate::proc::{force_utf8_env, hide_window_tokio, read_line_lossy};
+#[cfg(windows)]
+use crate::proc::attach_kill_on_close_job;
+use crate::progress::{emit_progress, parse_ffmpeg_time, parse_progress_line};
+use crate::state::{is_cancelled, is_paused, CancelSet, PausingSet, TaskTable};
+
+pub fn is_network_error(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    if [
+        "http error 404",
+        "http error 410",
+        "http error 451",
+        "not a valid url",
+        "unsupported url",
+        "private video",
+        "video unavailable",
+        "requested format is not available",
+    ]
+    .iter()
+    .any(|k| m.contains(k))
+    {
+        return false;
+    }
+    [
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "timed out",
+        "timeout",
+        "temporary failure",
+        "getaddrinfo",
+        "name or service not known",
+        "unable to download webpage",
+        "network is down",
+        "network is unreachable",
+        "10054",
+        "10060",
+        "read error",
+        "incomplete read",
+        "http error 500",
+        "http error 502",
+        "http error 503",
+        "precondition failed",
+    ]
+    .iter()
+    .any(|k| m.contains(k))
+}
+
+/// 判定是否「断点失效」类错误（HTTP 416：.part 大小与服务端错位）。
+/// 此时续传必然再次 416，必须删除 .part 从头下载。
+pub fn is_unsatisfiable_range(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("416") || m.contains("requested range not satisfiable")
+}
+
+/// 删除某输出模板对应的 .part 断点文件（含分片 .part-FragN）。
+/// output_template 形如 {目录}\{前缀}.v.%(ext)s
+pub async fn delete_part_files(output_template: &str) {
+    let Some(stripped) = output_template.strip_suffix("%(ext)s") else {
+        return;
+    };
+    let Some(sep) = stripped.rfind(['\\', '/']) else {
+        return;
+    };
+    let (dir, prefix) = (&stripped[..sep], &stripped[sep + 1..]);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.filter_map(|e| e.ok()) {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with(prefix)
+            && (name.ends_with(".part") || name.contains(".part-Frag"))
+        {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// 带断网自动重试的单轨下载：网络类失败按退避自动续传重试
+/// （每次重启 yt-dlp 都从 .part 断点接着下），重试等待期间暂停/取消随时可打断。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_track_with_retry(
+    ytdlp: &PathBuf,
+    url: &str,
+    format_id: &str,
+    stage: &str,
+    app: &AppHandle,
+    output_template: &str,
+    task_id: &str,
+    tasks: &TaskTable,
+    pausing: &PausingSet,
+    cancelling: &CancelSet,
+    cookie: Option<&str>,
+    seq: u64,
+) -> Result<(), String> {
+    const MAX_RETRIES: u32 = 6;
+    let mut attempt: u32 = 0;
+    loop {
+        let result = run_ytdlp_with_progress(
+            ytdlp,
+            url,
+            format_id,
+            stage,
+            app,
+            output_template,
+            task_id,
+            tasks,
+            pausing,
+            cancelling,
+            cookie,
+            seq,
+        )
+        .await;
+        match result {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let unsatisfiable = is_unsatisfiable_range(&e);
+                attempt += 1;
+                if attempt > MAX_RETRIES {
+                    return Err(e);
+                }
+                if unsatisfiable {
+                    // 断点已毒化：删除 .part 后从头下载（自动自愈，无需用户手动清理）
+                    delete_part_files(output_template).await;
+                    emit_progress(
+                        app,
+                        task_id,
+                        stage,
+                        0.0,
+                        "断点失效，重新下载".into(),
+                        "-".into(),
+                        "-".into(),
+                    );
+                } else if !is_network_error(&e) {
+                    return Err(e);
+                }
+                // 退避：5s/20s/45s/60s/60s/60s，总窗口约 4 分钟
+                let wait_secs = std::cmp::min(5 * attempt * attempt, 60);
+                // 进度值传 0 由前端忽略（避免把进度条打回 0），重试提示走速度位
+                emit_progress(
+                    app,
+                    task_id,
+                    stage,
+                    0.0,
+                    format!("网络重试 {attempt}/{MAX_RETRIES}"),
+                    "-".into(),
+                    "-".into(),
+                );
+                for _ in 0..wait_secs * 2 {
+                    if is_paused(pausing, task_id, seq).await {
+                        return Err("__paused__".to_string());
+                    }
+                    if is_cancelled(cancelling, task_id, seq).await {
+                        return Err("__cancelled__".to_string());
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
+        }
+    }
+}
+
+
+
+/// 单轨下载：启动 yt-dlp 子进程，逐行解析进度回传，按退出码判定成败。
+/// seq 为本次运行代号，暂停/取消标记按它严格匹配（见 state.rs 注释）。
+#[allow(clippy::too_many_arguments)]
+pub async fn run_ytdlp_with_progress(
+    ytdlp: &PathBuf,
+    url: &str,
+    format_id: &str,
+    stage: &str,
+    app: &AppHandle,
+    output_template: &str,
+    task_id: &str,
+    tasks: &TaskTable,
+    pausing: &PausingSet,
+    cancelling: &CancelSet,
+    cookie_source: Option<&str>,
+    seq: u64,
+) -> Result<(), String> {
+    // spawn 前最后一次检查：消除检查点之后、进程启动之前点击暂停/取消的竞态窗口
+    if is_paused(pausing, task_id, seq).await {
+        return Err("__paused__".to_string());
+    }
+    if is_cancelled(cancelling, task_id, seq).await {
+        return Err("__cancelled__".to_string());
+    }
+
+    let mut args: Vec<String> = vec![
+        "-f".into(),
+        format_id.to_string(),
+        "--progress".into(),
+        "--newline".into(),
+        "--no-colors".into(),
+        // 与解析路径（run_ytdlp_dump）保持一致：多 P 视频只下载用户所选/解析的
+        // 那一个视频，而不是把整个分 P 播放列表全部下载
+        "--no-playlist".into(),
+        "-o".into(),
+        output_template.to_string(),
+    ];
+    if let Some(src) = cookie_source {
+        if !src.is_empty() && src != "none" {
+            args.push("--cookies-from-browser".into());
+            args.push(src.to_string());
+        }
+    }
+    args.push("--".into());
+    args.push(url.to_string());
+
+    // unix：设置独立进程组，停止时整组击杀（PyInstaller 为父子进程结构）
+    #[allow(unused_mut)]
+    let mut std_spawn = std::process::Command::new(ytdlp);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        std_spawn.process_group(0);
+    }
+    let mut spawn = Command::from(std_spawn);
+    spawn.args(&args);
+    // yt-dlp 是 Python 程序：Windows 下 stdout 为管道时默认用本地编码（GBK），
+    // 中文进度行会变成非 UTF-8 字节，配合 lossy 读取双保险
+    force_utf8_env(&mut spawn);
+    hide_window_tokio(&mut spawn);
+    let mut child = spawn
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("启动 yt-dlp 失败: {}", e))?;
+
+    // yt-dlp 新版进度行输出到 stdout（非 stderr）
+    let pid = child.id();
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let stdout_reader = BufReader::new(stdout);
+    let stderr_reader = BufReader::new(stderr);
+
+    // 登记子进程 PID（停止时树杀用）；子进程对象由本任务独占，不共享互斥锁
+    tasks.lock().await.insert(task_id.to_string(), pid);
+    // 应用退出时自动终止下载进程树（见 attach_kill_on_close_job 注释）
+    #[cfg(windows)]
+    attach_kill_on_close_job(&child);
+
+    let app_clone = app.clone();
+    let stage_c = stage.to_string();
+    let task_id_c = task_id.to_string();
+    // 读 stdout 进度行，解析后发事件
+    let progress_handle = tokio::spawn(async move {
+        let mut r = stdout_reader;
+        let mut line_buf = Vec::new();
+        while let Ok(Some(line)) = read_line_lossy(&mut r, &mut line_buf).await {
+            if let Some(payload) = parse_progress_line(&line, &stage_c) {
+                if payload.progress > 0.0 || payload.speed != "-" {
+                    emit_progress(
+                        &app_clone,
+                        &task_id_c,
+                        &payload.stage,
+                        payload.progress,
+                        payload.speed,
+                        payload.eta,
+                        payload.filename,
+                    );
+                }
+            }
+        }
+    });
+
+    // 收集 stderr 用于失败时报错
+    let err_handle = tokio::spawn(async move {
+        let mut r = stderr_reader;
+        let mut buf: Vec<String> = Vec::new();
+        let mut line_buf = Vec::new();
+        while let Ok(Some(line)) = read_line_lossy(&mut r, &mut line_buf).await {
+            if !line.trim().is_empty() {
+                buf.push(line);
+                if buf.len() > 12 {
+                    buf.remove(0);
+                }
+            }
+        }
+        buf
+    });
+
+    // 等进程结束（子进程对象独占，无锁竞争；stop_task 树杀后此 wait 立即返回）
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("yt-dlp 进程出错: {}", e))?;
+
+    // 等 reader 任务结束
+    let _ = progress_handle.await;
+    let last_stderr = err_handle.await.unwrap_or_default();
+
+    if !status.success() {
+        let tail = last_stderr
+            .iter()
+            .filter(|l| {
+                let l = l.to_lowercase();
+                l.contains("error") || l.contains("sign in") || l.contains("cookie")
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let hint = if tail.is_empty() {
+            "请检查网络或视频是否可用".to_string()
+        } else {
+            tail
+        };
+        return Err(format!("yt-dlp 失败（退出码 {}）：\n{}", status, hint));
+    }
+
+    Ok(())
+}
+
+pub async fn merge_with_ffmpeg(
+    video_path: &str,
+    audio_path: &str,
+    output_path: &str,
+    duration_secs: u32,
+    app: &AppHandle,
+    task_id: &str,
+    tasks: &TaskTable,
+) -> Result<(), String> {
+    let ffmpeg =
+        find_ffmpeg().ok_or_else(|| "未找到 ffmpeg（打包版本异常）".to_string())?;
+
+    emit_progress(app, task_id, "merge", 0.0, "-".into(), "-".into(), "Merging...".into());
+
+    #[allow(unused_mut)]
+    let mut std_spawn = std::process::Command::new(&ffmpeg);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        std_spawn.process_group(0);
+    }
+    let mut spawn = Command::from(std_spawn);
+    spawn.args([
+        "-y",
+        "-i",
+        video_path,
+        "-i",
+        audio_path,
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-strict",
+        "experimental",
+        // 若视频轨因断点续传损坏而略短于音频轨，-shortest 让输出在视频结束时
+        // 收尾，避免出现画面冻结在最后一帧、声音继续播的坏文件
+        "-shortest",
+        "-progress",
+        "pipe:1",
+        output_path,
+    ]);
+    force_utf8_env(&mut spawn);
+    hide_window_tokio(&mut spawn);
+    let mut child = spawn
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("启动 ffmpeg 失败: {}", e))?;
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let mut reader = BufReader::new(stdout);
+    let mut err_reader = BufReader::new(stderr);
+
+    // 登记子进程 PID（停止时树杀用）；子进程对象由本任务独占，不共享互斥锁
+    let pid = child.id();
+    tasks.lock().await.insert(task_id.to_string(), pid);
+    // 应用退出时自动终止合并进程（见 attach_kill_on_close_job 注释）
+    #[cfg(windows)]
+    attach_kill_on_close_job(&child);
+
+    let app_clone = app.clone();
+    let duration = duration_secs.max(1) as f64;
+    let task_id_c = task_id.to_string();
+
+    // 读取进度输出
+    let progress_handle = tokio::spawn(async move {
+        let mut last_progress = 0.0;
+        let mut line_buf = Vec::new();
+        while let Ok(Some(line)) = read_line_lossy(&mut reader, &mut line_buf).await {
+            if let Some(t) = parse_ffmpeg_time(&line) {
+                let pct = ((t / duration) * 100.0).min(99.9).max(last_progress);
+                last_progress = pct;
+                emit_progress(
+                    &app_clone,
+                    &task_id_c,
+                    "merge",
+                    pct,
+                    "-".into(),
+                    "-".into(),
+                    "Merging...".into(),
+                );
+            }
+        }
+    });
+
+    // 收集 stderr 用于报错
+    let err_handle = tokio::spawn(async move {
+        let mut buf = String::new();
+        let mut line_buf = Vec::new();
+        while let Ok(Some(line)) = read_line_lossy(&mut err_reader, &mut line_buf).await {
+            buf.push_str(&line);
+            buf.push('\n');
+        }
+        buf
+    });
+
+    let (status, _, stderr_log) = tokio::join!(child.wait(), progress_handle, err_handle);
+
+    let status = status.map_err(|e| format!("ffmpeg 进程出错: {}", e))?;
+    let stderr_log = stderr_log.unwrap_or_default();
+    if !status.success() {
+        return Err(format!("ffmpeg 合并失败: {}", stderr_log));
+    }
+
+    emit_progress(app, task_id, "merge", 100.0, "-".into(), "-".into(), "Merging...".into());
+    Ok(())
+}
+

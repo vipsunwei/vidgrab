@@ -1,0 +1,23 @@
+# 统一换行符策略：仓库内一律 LF，检出时也保持 LF（覆盖个人 core.autocrlf 配置）。
+# 跨平台项目必须统一，否则 shell 脚本/hook/CI 在 macOS/Linux 上会因 CRLF 跑挂。
+* text=auto eol=lf
+
+# Windows 专属脚本保留 CRLF（cmd/PowerShell 对 LF 兼容性差）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制文件显式标记，避免被误做换行转换
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.dll binary
+*.zip binary
+*.gz binary
+*.xz binary
+*.woff binary
+*.woff2 binary

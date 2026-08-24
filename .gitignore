@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+*.tsbuildinfo
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+
+# Bundled runtime binaries (downloaded at build/runtime)
+src-tauri/bin/ffmpeg-extract/
+src-tauri/bin/ffmpeg*
+src-tauri/bin/ffprobe.exe
+# Windows 的 yt-dlp.exe 随仓库提交（打包进安装包，目标机器无需 Python）
+# macOS/Linux 的 yt-dlp 无扩展名版本体积大（30MB+），由 scripts/fetch-binaries.ts 构建时拉取
+src-tauri/bin/yt-dlp
+src-tauri/bin/yt-dlp.zip
+src-tauri/bin/yt-dlp.pyz
+# fetch 脚本生成的版本清单（本地派生态，不入库）
+src-tauri/bin/binaries.lock.json
+
+# Python scripts used only for local theming fixes
+_fix_*.py
+_fix_*.ps1
+*.bak

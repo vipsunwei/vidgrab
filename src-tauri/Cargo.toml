@@ -1,0 +1,49 @@
+[package]
+name = "vidgrab"
+version = "0.0.1"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "vidgrab_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "rt", "macros"] }
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
+base64 = "0.22"
+zip = "2"
+dirs = "5"
+
+# Linux 运行时安装 ffmpeg 需要：BtbN 的 Linux 包是 tar.xz 格式
+[target.'cfg(target_os = "linux")'.dependencies]
+tar = "0.4"
+xz2 = "0.1"
+
+# unix 进程组击杀（PyInstaller 父子进程树）
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Windows 作业对象：应用退出时自动终止孤儿下载进程（KILL_ON_JOB_CLOSE）
+[target.'cfg(windows)'.dependencies]
+win32job = "2"
+
+# 窗口大小/位置记忆
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-window-state = "2"
+

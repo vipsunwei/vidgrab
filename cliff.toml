@@ -1,0 +1,51 @@
+# git-cliff 配置：从 Conventional Commits 提交历史生成 CHANGELOG。
+# 用法：git-cliff -o CHANGELOG.md（全量）；git-cliff --latest --strip all（最近一个版本的正文，CI 发版用）
+# 文档：https://git-cliff.org
+[changelog]
+# changelog 头部
+header = """
+# Changelog
+
+本项目的所有显著变更记录于此，格式基于 Keep a Changelog，
+分组来自 Conventional Commits 提交规范。
+
+"""
+# 每个版本区块的模板
+body = """
+{% if version %}## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}{% else %}## 未发布{% endif %}
+
+{% for group, commits in commits | group_by(attribute="group") %}### {{ group | upper_first }}
+{% for commit in commits %}- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{% if commit.breaking %}**[破坏性]** {% endif %}{{ commit.message | upper_first }}
+{% endfor %}
+{% endfor %}
+"""
+# 去掉 body 首尾空白
+trim = true
+# changelog 尾部
+footer = "<!-- 由 git-cliff 自动生成，请勿手动编辑 -->"
+
+[git]
+# 只解析 Conventional Commits
+conventional_commits = true
+# 不符合规范的提交归入「其他」而不是丢弃
+filter_unconventional = false
+split_commits = false
+# 只认 vX.Y.Z 形式的 tag
+tag_pattern = "v[0-9].*"
+sort_commits = "oldest"
+
+commit_parsers = [
+  { message = "^feat", group = "✨ 新功能" },
+  { message = "^fix", group = "🐛 问题修复" },
+  { message = "^perf", group = "⚡ 性能优化" },
+  { message = "^refactor", group = "♻️ 重构" },
+  { message = "^doc", group = "📝 文档" },
+  { message = "^style", group = "💄 样式" },
+  { message = "^test", group = "✅ 测试" },
+  { message = "^build", group = "📦 构建" },
+  { message = "^ci", group = "👥 CI/CD" },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore", group = "🔧 杂项" },
+  { message = "^revert", group = "⏪ 回滚" },
+  { message = ".*", group = "🔤 其他" },
+]

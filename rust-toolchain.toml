@@ -1,0 +1,5 @@
+# Rust 工具链固定版本：本地 rustup 与 CI 都以此为准，升级节奏由自己掌握。
+# 升级方式：改 channel 后提交即可（CI 工作流会从此文件读取版本，无需改工作流）。
+# 注意与 Cargo.lock 一起验证：升级后跑 pnpm run build + cargo test 再发版。
+[toolchain]
+channel = "1.98.0"

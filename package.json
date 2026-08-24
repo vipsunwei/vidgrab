@@ -1,0 +1,35 @@
+{
+  "name": "vidgrab",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.node.json && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "fetch:binaries": "node scripts/fetch-binaries.ts",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-opener": "^2",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
+    "@commitlint/types": "^21.2.0",
+    "@iconify-json/ph": "^1.2.2",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.4.0",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "husky": "^9.1.7",
+    "typescript": "~6.0.3",
+    "unocss": "^66.8.1",
+    "vite": "^8.2.2",
+    "vue-tsc": "^3.3.11"
+  },
+  "packageManager": "pnpm@11.24.0"
+}

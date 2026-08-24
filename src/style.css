@@ -1,0 +1,207 @@
+/* VidGrab — 统一深色科技风 Design Tokens */
+
+:root {
+  /* 背景层 */
+  --v-bg: #090b12;
+  --v-bg-rgb: 9, 11, 18;
+  --v-bg-elevated: #0d1020;
+  --v-bg-elevated-rgb: 13, 16, 32;
+
+  /* 表面/卡片层 */
+  --v-surface: rgba(255, 255, 255, 0.035);
+  --v-surface-hover: rgba(255, 255, 255, 0.055);
+  --v-surface-active: rgba(255, 255, 255, 0.075);
+  --v-surface-solid: #11152a;
+
+  /* 边框 */
+  --v-border: rgba(255, 255, 255, 0.08);
+  --v-border-strong: rgba(255, 255, 255, 0.12);
+  --v-border-focus: rgba(76, 141, 255, 0.45);
+
+  /* 文本 */
+  --v-text: rgba(255, 255, 255, 0.92);
+  --v-text-secondary: rgba(255, 255, 255, 0.6);
+  --v-text-tertiary: rgba(255, 255, 255, 0.4);
+  --v-text-muted: rgba(255, 255, 255, 0.25);
+  --v-text-inverse: #ffffff;
+
+  /* 主品牌色：蓝 → 紫 */
+  --v-blue: #4c8dff;
+  --v-blue-rgb: 76, 141, 255;
+  --v-purple: #a855f7;
+  --v-purple-rgb: 168, 85, 247;
+  --v-cyan: #38bdf8;
+  --v-cyan-rgb: 56, 189, 248;
+
+  /* 功能色 */
+  --v-green: #10b981;
+  --v-green-rgb: 16, 185, 129;
+  --v-teal: #14b8a6;
+  --v-teal-rgb: 20, 184, 166;
+  --v-red: #ef4444;
+  --v-red-rgb: 239, 68, 68;
+  --v-orange: #f59e0b;
+  --v-orange-rgb: 245, 158, 11;
+
+  /* 阴影/光晕 */
+  --v-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --v-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --v-shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
+  --v-glow-blue: 0 0 20px rgba(var(--v-blue-rgb), 0.35);
+  --v-glow-purple: 0 0 20px rgba(var(--v-purple-rgb), 0.3);
+  --v-glow-green: 0 0 14px rgba(var(--v-green-rgb), 0.35);
+  --v-glow-red: 0 0 14px rgba(var(--v-red-rgb), 0.3);
+
+  /* 圆角 */
+  --v-radius-xs: 6px;
+  --v-radius-sm: 10px;
+  --v-radius: 14px;
+  --v-radius-lg: 16px;
+  --v-radius-xl: 20px;
+  --v-radius-full: 9999px;
+
+  /* 过渡 */
+  --v-transition-fast: 0.15s ease;
+  --v-transition: 0.2s ease;
+  --v-transition-slow: 0.35s ease;
+}
+
+/* 浅色模式兼容：当前 VidGrab 固定深色，保留最小变量覆盖即可 */
+html.light {
+  --v-bg: #f0f4f8;
+  --v-bg-rgb: 240, 244, 248;
+  --v-bg-elevated: #ffffff;
+  --v-bg-elevated-rgb: 255, 255, 255;
+
+  --v-surface: rgba(0, 0, 0, 0.03);
+  --v-surface-hover: rgba(0, 0, 0, 0.05);
+  --v-surface-active: rgba(0, 0, 0, 0.08);
+  --v-surface-solid: #ffffff;
+
+  --v-border: rgba(0, 0, 0, 0.08);
+  --v-border-strong: rgba(0, 0, 0, 0.12);
+
+  --v-text: rgba(17, 24, 39, 0.92);
+  --v-text-secondary: rgba(17, 24, 39, 0.6);
+  --v-text-tertiary: rgba(17, 24, 39, 0.45);
+  --v-text-muted: rgba(17, 24, 39, 0.25);
+  --v-text-inverse: #111827;
+}
+
+/* 全局基础 */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: var(--v-bg);
+  color: var(--v-text);
+  transition: color var(--v-transition);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+/* 通用组件类（保留给未来使用）*/
+.v-card {
+  background: var(--v-surface);
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-lg);
+  box-shadow: var(--v-shadow);
+  transition: border-color var(--v-transition-fast), box-shadow var(--v-transition-fast);
+}
+
+.v-card-hover:hover {
+  border-color: var(--v-border-strong);
+  box-shadow: var(--v-shadow-lg);
+}
+
+.v-gradient {
+  background: linear-gradient(135deg, var(--v-blue), var(--v-purple));
+}
+
+.v-gradient-text {
+  background: linear-gradient(135deg, var(--v-blue), var(--v-cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.v-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 24px;
+  border: none;
+  border-radius: var(--v-radius-sm);
+  background: linear-gradient(135deg, var(--v-blue), var(--v-purple));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(var(--v-blue-rgb), 0.35);
+  transition: all var(--v-transition-fast);
+}
+
+.v-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 6px 24px rgba(var(--v-blue-rgb), 0.5);
+  transform: translateY(-1px);
+}
+
+.v-btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.v-btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--v-border-strong);
+  border-radius: var(--v-radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--v-blue-rgb), 0.45);
+}
+
+/* 过渡动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}

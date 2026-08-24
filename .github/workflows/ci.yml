@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # 提交信息规范校验：防止本地 --no-verify 绕过 husky hook
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 校验提交信息
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pnpm exec commitlint --from "${{ github.event.pull_request.base.sha }}" --to HEAD
+          else
+            git log -1 --pretty=%s | pnpm exec commitlint
+          fi
+
+  # 三平台编译 + 单元测试
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # 工具链版本单一来源是 rust-toolchain.toml：这里读出来传给 action（action 不会自己读文件）
+      - name: 读取固定工具链版本
+        id: rust
+        shell: bash
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml | head -1)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          # 显式声明：该 action 的组件默认集随版本变动，CI 依赖 clippy 必须锁住
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: 安装 Linux 系统依赖 (Tauri 编译需要)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xz-utils unzip
+      - run: pnpm install --frozen-lockfile
+      # 构建期拉取 yt-dlp/ffmpeg 到 src-tauri/bin/（二进制不入库，Tauri build script 会校验
+      # resources 声明的 bin/yt-dlp 是否存在，缺失会导致 generate_context! 直接失败）。
+      # 必须在 pnpm run build 之前执行。
+      - name: 拉取 yt-dlp / ffmpeg 二进制
+        run: pnpm run fetch:binaries
+      - run: pnpm run build
+      # Clippy 三平台各跑一遍：cfg(windows)/cfg(unix) 分支只有对应平台才会编译，
+      # 跨平台代码（如进程树击杀）写错时，本机的单一平台编译发现不了。
+      # -D warnings 让「死代码/未使用 import」这类问题直接失败，避免在 CI 里悄悄累积。
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test

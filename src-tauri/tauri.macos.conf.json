@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "resources": {
+      "bin/yt-dlp": "yt-dlp",
+      "bin/ffmpeg": "ffmpeg"
+    }
+  }
+}

@@ -1,0 +1,116 @@
+# 三平台安装包发布流水线
+# 用法：把版本号改好（src-tauri/tauri.conf.json、src-tauri/Cargo.toml）后打 tag 推送：
+#   git tag v0.0.1 && git push origin v0.0.1
+# 三个平台并行构建，产物上传到一个「草稿 Release」，检查无误后手动点 Publish 发布。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # Apple Silicon (M 系列)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # Intel 芯片
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          # 固定 22.04：glibc 较老，产出的 deb/AppImage 兼容更多发行版
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    env:
+      # fetch-binaries.ts 据此选择对应架构的 ffmpeg（arm64 runner 交叉编 x86_64 mac 包时必需）
+      TAURI_TARGET: ${{ matrix.target }}
+    steps:
+      # git-cliff 生成变更日志需要完整提交历史与 tag
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # 工具链版本单一来源是 rust-toolchain.toml：这里读出来传给 action（action 不会自己读文件）
+      - name: 读取固定工具链版本
+        id: rust
+        shell: bash
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml | head -1)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      # 缓存构建期拉取的 yt-dlp/ffmpeg：命中后构建不依赖外部下载源；
+      # fetch-binaries.ts 变更（如升级 yt-dlp 版本号）时哈希变化自动重新拉取
+      - uses: actions/cache@v4
+        with:
+          path: src-tauri/bin
+          key: bin-${{ matrix.target }}-${{ hashFiles('scripts/fetch-binaries.ts') }}
+
+      - name: 安装 Linux 系统依赖 (Tauri 编译需要)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xz-utils unzip
+
+      - name: 校验 tag 与应用版本一致
+        shell: bash
+        run: |
+          VER="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          if [ "$VER" != "$GITHUB_REF_NAME" ]; then
+            echo "tag ($GITHUB_REF_NAME) 与 tauri.conf.json 版本 ($VER) 不一致，请先改版本号再打 tag"
+            exit 1
+          fi
+
+      - name: 安装 git-cliff
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: 生成本次版本变更日志
+        id: changelog
+        shell: bash
+        run: |
+          {
+            echo 'body<<CHANGELOG_EOF'
+            git-cliff --latest --strip all
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'VidGrab ${{ github.ref_name }}'
+          releaseBody: |
+            ${{ steps.changelog.outputs.body }}
+
+            ---
+
+            三平台安装包：Windows (NSIS) / macOS (DMG，Apple Silicon 与 Intel) / Linux (deb 与 AppImage)。
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}
