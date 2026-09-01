@@ -121,63 +121,7 @@ body {
   z-index: 1;
 }
 
-/* 通用组件类（保留给未来使用）*/
-.v-card {
-  background: var(--v-surface);
-  border: 1px solid var(--v-border);
-  border-radius: var(--v-radius-lg);
-  box-shadow: var(--v-shadow);
-  transition: border-color var(--v-transition-fast), box-shadow var(--v-transition-fast);
-}
-
-.v-card-hover:hover {
-  border-color: var(--v-border-strong);
-  box-shadow: var(--v-shadow-lg);
-}
-
-.v-gradient {
-  background: linear-gradient(135deg, var(--v-blue), var(--v-purple));
-}
-
-.v-gradient-text {
-  background: linear-gradient(135deg, var(--v-blue), var(--v-cyan));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.v-btn-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 24px;
-  border: none;
-  border-radius: var(--v-radius-sm);
-  background: linear-gradient(135deg, var(--v-blue), var(--v-purple));
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 4px 18px rgba(var(--v-blue-rgb), 0.35);
-  transition: all var(--v-transition-fast);
-}
-
-.v-btn-primary:hover:not(:disabled) {
-  box-shadow: 0 6px 24px rgba(var(--v-blue-rgb), 0.5);
-  transform: translateY(-1px);
-}
-
-.v-btn-primary:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.v-btn-primary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* 滚动条 */
+/* 滚动条：静止时隐藏，滚动时显示（.scrolling 由 useAutoScrollbar 维护，700ms 静止后移除） */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -188,8 +132,13 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--v-border-strong);
+  background: transparent;
   border-radius: var(--v-radius-full);
+  transition: background 0.2s ease;
+}
+
+.scrolling::-webkit-scrollbar-thumb {
+  background: var(--v-border-strong);
 }
 
 ::-webkit-scrollbar-thumb:hover {

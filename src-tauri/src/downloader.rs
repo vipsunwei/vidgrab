@@ -189,6 +189,21 @@ pub fn verify_ytdlp(path: &PathBuf) -> bool {
     )
 }
 
+/// 判断是否为可用的 Cookie 文件路径。
+/// 以 .txt 结尾且该文件真实存在——非文件路径（含旧的浏览器名）一律忽略，
+/// 避免把任意字符串当路径喂给 yt-dlp。
+pub fn is_cookie_file(src: &str) -> bool {
+    src.ends_with(".txt") && Path::new(src).is_file()
+}
+
+/// 把 cookie 参数追加到 yt-dlp 参数序列（解析与下载共用）。仅文件路径才追加 --cookies。
+pub fn push_cookie_args(args: &mut Vec<String>, cookie: &str) {
+    if is_cookie_file(cookie) {
+        args.push("--cookies".into());
+        args.push(cookie.to_string());
+    }
+}
+
 /// 执行 yt-dlp --dump-json，拿到视频元数据 JSON（纯抓取，不下载）。
 pub fn run_ytdlp_dump(url: &str, cookie: Option<&str>) -> Result<String, String> {
     run_ytdlp_dump_with_pid(url, cookie, &std::sync::Mutex::new(None))
@@ -225,7 +240,11 @@ pub fn run_ytdlp_dump_with_pid(
     cmd.env("PYTHONUTF8", "1");
     if let Some(src) = cookie {
         if !src.is_empty() && src != "none" {
-            cmd.arg("--cookies-from-browser").arg(src);
+            let mut cookie_args: Vec<String> = Vec::new();
+            push_cookie_args(&mut cookie_args, src);
+            for a in cookie_args {
+                cmd.arg(a);
+            }
         }
     }
     cmd.arg(&url);

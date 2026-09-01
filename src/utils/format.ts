@@ -42,11 +42,24 @@ export function parseHeight(res: string): number {
   return parseInt(res, 10) || 0
 }
 
-/// 从 URL 推断平台名；仅识别已验证支持的两个平台，其余返回空串由调用方兜底
+/// 从 URL 推断平台名（与后端 url::detect_platform 保持一致）。
+/// 无法识别时返回空串，由调用方兜底。
 export function detectPlatform(raw: string): string {
   const u = (raw || '').toLowerCase()
   if (u.includes('bilibili.com') || u.includes('b23.tv')) return '哔哩哔哩'
   if (u.includes('youtube.com') || u.includes('youtu.be')) return 'YouTube'
+  if (u.includes('douyin.com')) return '抖音'
+  if (u.includes('xiaohongshu.com') || u.includes('xhslink.com')) return '小红书'
+  if (u.includes('weibo.com')) return '微博'
+  if (u.includes('v.qq.com')) return '腾讯视频'
+  if (u.includes('iqiyi.com')) return '爱奇艺'
+  if (u.includes('youku.com')) return '优酷'
+  if (u.includes('douyu.com')) return '斗鱼'
+  if (u.includes('huya.com')) return '虎牙'
+  if (u.includes('acfun.cn')) return 'AcFun'
+  if (u.includes('twitter.com') || u.includes('x.com')) return 'Twitter / X'
+  if (u.includes('instagram.com')) return 'Instagram'
+  if (u.includes('facebook.com') || u.includes('fb.watch')) return 'Facebook'
   return ''
 }
 
@@ -55,17 +68,4 @@ export function formatSizeLabel(f: FormatInfo): string {
   if (f.filesize) return `· ${formatSize(f.filesize)}`
   if (f.filesize_approx) return `· ~${formatSize(f.filesize_approx)}`
   return ''
-}
-
-/// 把浏览器 Cookie 读取失败的原始报错翻译成可操作的引导。
-/// 其余错误原样返回，避免吞掉真实原因。
-export function enhanceCookieError(msg: string): string {
-  if (/Could not copy.*cookie database|database is locked|cookie.*locked/i.test(msg)) {
-    return (
-      msg +
-      '\n\n浏览器 Cookie 数据库被占用：请完全关闭 Chrome/Edge（或结束所有相关进程）后再试，' +
-      '也可以在「设置」换一个未运行的浏览器，或导出 cookies.txt 作为后续方案。'
-    )
-  }
-  return msg
 }

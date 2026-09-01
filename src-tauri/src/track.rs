@@ -7,7 +7,7 @@ use tauri::AppHandle;
 use tokio::io::BufReader;
 use tokio::process::Command;
 
-use crate::downloader::find_ffmpeg;
+use crate::downloader::{find_ffmpeg, push_cookie_args};
 use crate::proc::{force_utf8_env, hide_window_tokio, read_line_lossy};
 #[cfg(windows)]
 use crate::proc::attach_kill_on_close_job;
@@ -211,8 +211,8 @@ pub async fn run_ytdlp_with_progress(
     ];
     if let Some(src) = cookie_source {
         if !src.is_empty() && src != "none" {
-            args.push("--cookies-from-browser".into());
-            args.push(src.to_string());
+            // 与解析路径共用 push_cookie_args
+            push_cookie_args(&mut args, src);
         }
     }
     args.push("--".into());

@@ -26,6 +26,7 @@
         :can-download="canDownload"
         @parse="onParse"
         @dismiss="dismiss"
+        @clear-error="clearParseError"
         @select-video="selectVideo"
         @select-audio="selectAudio"
         @open-settings="openQuickSettings"
@@ -67,11 +68,13 @@
         v-else-if="activeNav === 'settings'"
         v-model:dir-draft="settingsDraft"
         :default-output-dir="defaultOutputDir"
-        :cookie-source="cookieSource"
+        :cookie-groups="cookieGroups"
         :app-version="appVersion"
         :page-saved="pageSaved"
         @browse="pickOutputDir"
-        @set-cookie="setCookieSource"
+        @add-cookie="addCookieStore"
+        @remove-group="removeCookieGroup"
+        @clear-cookie="clearCookieStore"
         @save="saveSettingsPage"
       />
     </main>
@@ -104,10 +107,8 @@
       :show="showQuickSettings"
       v-model:dir-draft="settingsDraft"
       :default-output-dir="defaultOutputDir"
-      :cookie-source="cookieSource"
       :just-saved="justSaved"
       @browse="pickOutputDir"
-      @set-cookie="setCookieSource"
       @save="saveQuickSettings"
       @close="showQuickSettings = false"
     />
@@ -137,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openPath, revealItemInDir, openUrl } from '@tauri-apps/plugin-opener'
@@ -174,9 +175,28 @@ const {
   effectiveOutputDir,
   loadDefaultOutputDir,
   setOutputDir,
-  cookieSource,
-  setCookieSource,
 } = useSettings()
+
+// Cookie 固定存储（app_data/cookies.txt）：按站点组管理，非空即启用
+const cookieGroups = ref<string[]>([])
+// 固定存储路径，启动时取一次，作为 --cookies 参数值传回后端
+const cookieStorePath = ref('')
+const cookieEnabled = computed(() => cookieGroups.value.length > 0)
+
+// Cookie 存储路径：有文件就用路径，否则空串（后端据此不加 --cookies）
+function resolveCookieArg(): string {
+  return cookieEnabled.value ? cookieStorePath.value : ''
+}
+
+// 从后端刷新站点组列表
+async function refreshCookieStore() {
+  try {
+    const status = await invoke<{ groups: string[] }>('cookie_store_status')
+    cookieGroups.value = status.groups ?? []
+  } catch {
+    cookieGroups.value = []
+  }
+}
 
 // 依赖安装（yt-dlp / ffmpeg）
 const {
@@ -208,8 +228,16 @@ const appVersion = ref('')
 
 // 历史记录
 const historyStore = useHistory({
-  onRemoveDoneCard: (rec) => queue.removeDoneCardForRecord(rec),
-  onClearDoneCards: () => queue.removeDoneCards(),
+  onRemoveDoneCard: (rec) => {
+    queue.removeDoneCardForRecord(rec)
+    // 记录删了就同步清同会话去重键：否则再点下载会被 finishedKeys 拦截，
+    // 但记录已不存在，用户无从查看
+    queue.removeFinishedKeys([rec])
+  },
+  onClearDoneCards: () => {
+    queue.removeDoneCards()
+    queue.clearFinishedKeys()
+  },
 })
 const {
   history,
@@ -226,7 +254,7 @@ const {
 
 // 下载队列
 const queue = useDownloadQueue({
-  getCookieSource: () => cookieSource.value,
+  getCookieFile: resolveCookieArg,
   getOutputDir: () => outputDir.value,
   // 跨会话去重：检查内存中的历史记录（含重启后从磁盘载入的）是否已存在同视频同画质的成品。
   // 去重键只用 url + qualityTag：文件名差异不影响「是否同一份内容」。
@@ -238,10 +266,11 @@ const queue = useDownloadQueue({
       return h.qualityTag === qualityTag
     }),
   onTaskDone: (task, outputPath, title, url) => {
+    const recordUrl = url || task?.url || ''
     addHistoryRecord({
-      url: url || task?.url || '',
-      title: title || task?.title || url,
-      platform: task?.url ? detectPlatform(task.url) : '',
+      url: recordUrl,
+      title: title || task?.title || recordUrl,
+      platform: detectPlatform(recordUrl),
       thumbnail: task?.thumbnail ?? '',
       outputPath,
       taskId: task?.id ?? '',
@@ -274,7 +303,7 @@ const {
 } = queue
 
 // 解析
-const parser = useParser(() => cookieSource.value)
+const parser = useParser(resolveCookieArg)
 const {
   url,
   loading,
@@ -297,6 +326,11 @@ const {
 } = parser
 
 // 解析动作
+/// 关闭解析报错提示
+function clearParseError() {
+  error.value = ''
+}
+
 async function onParse() {
   // 解析新链接时清理旧的失败/取消任务，避免旧报错一直占着界面
   queue.clearFailed()
@@ -520,6 +554,45 @@ async function pickOutputDir() {
   }
 }
 
+/// 选择导出的 cookies.txt 加入固定存储：站点名由文件域名自动识别，同站点再添加即整站更新。
+async function addCookieStore() {
+  try {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Cookie 文件', extensions: ['txt'] }],
+      title: '选择 cookies.txt',
+    })
+    if (typeof selected !== 'string') return
+    const group = await invoke<string>('add_cookie_store', { source: selected })
+    await refreshCookieStore()
+    showToast(`已添加「${group}」的 Cookie`)
+  } catch (e) {
+    showToast(String(e))
+  }
+}
+
+/// 删除单个站点的全部 Cookie（站点标签上的 × 按钮）
+async function removeCookieGroup(group: string) {
+  try {
+    await invoke('remove_cookie_group', { group })
+    await refreshCookieStore()
+    showToast(`已删除「${group}」的 Cookie`)
+  } catch (e) {
+    showToast(String(e))
+  }
+}
+
+/// 清空 Cookie 固定存储（清除按钮二次确认后调用）
+async function clearCookieStore() {
+  try {
+    await invoke('clear_cookie_store')
+    cookieGroups.value = []
+  } catch (e) {
+    showToast(String(e))
+  }
+}
+
 // 滚动条自动隐藏
 const mainScrollRef = ref<HTMLElement | null>(null)
 const bodyScrolling = ref(false)
@@ -567,6 +640,12 @@ onMounted(async () => {
   await historyStore.load()
   await loadDefaultOutputDir()
   await restoreTasks()
+  try {
+    cookieStorePath.value = await invoke<string>('cookie_store_path')
+  } catch {
+    cookieStorePath.value = ''
+  }
+  await refreshCookieStore()
 
   appVersion.value = await invoke<string>('get_app_version')
   await installQueue()

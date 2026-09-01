@@ -19,6 +19,7 @@ export interface FormatInfo {
   audio_channels: number | null
 }
 
+
 /// parse_video 命令的返回结构
 export interface VideoMetadata {
   title: string

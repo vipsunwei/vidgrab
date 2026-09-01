@@ -1,22 +1,18 @@
 // 视频解析域：URL 解析、格式轨道拆分与去重、清晰度/音质胶囊、选择与持久化。
 import { invoke } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
-import {
-  enhanceCookieError,
-  formatSizeLabel,
-  parseHeight,
-} from '@/utils/format'
+import { formatSizeLabel, parseHeight } from '@/utils/format'
 import type { DownloadMode, FormatInfo, TrackCapsule, VideoMetadata } from '@/types'
 
 const LAST_URL_KEY = 'vidgrab-last-url'
 const LAST_PARSE_KEY = 'vidgrab-last-parse'
 
-/// 传给后端的 cookie 来源：'none' 表示不使用（后端据此不加 --cookies-from-browser）
-function cookieArg(source: string): string | null {
-  return source === 'none' ? null : source
+/// 传给后端的 cookie 参数：无 Cookie 文件时为 null（后端据此不加 --cookies）
+function cookieArg(path: string): string | null {
+  return path ? path : null
 }
 
-export function useParser(getCookieSource: () => string) {
+export function useParser(getCookieFile: () => string) {
   // 地址栏 URL 持久化：重新打开应用时恢复最后一次输入/解析的链接
   const url = ref(localStorage.getItem(LAST_URL_KEY) ?? '')
   watch(url, (v) => {
@@ -275,13 +271,13 @@ export function useParser(getCookieSource: () => string) {
     try {
       const info = await invoke<VideoMetadata>('parse_video', {
         url: url.value,
-        cookieSource: cookieArg(getCookieSource()),
+        cookieSource: cookieArg(getCookieFile()),
       })
       metadata.value = info
       fillDefaultOutputName()
       selectCombo(comboOptions[0])
     } catch (e) {
-      error.value = enhanceCookieError(String(e))
+      error.value = String(e)
     } finally {
       loading.value = false
     }

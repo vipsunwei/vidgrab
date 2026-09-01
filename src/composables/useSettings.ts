@@ -4,11 +4,9 @@ import { computed, ref } from 'vue'
 
 // 全局设置（持久化到 localStorage）
 // outputDir: 空字符串 = 使用系统下载目录下的 VidGrab 子目录（默认）
+// 注意：Cookie 由应用托管（app_data/cookies.txt，见后端 cookies.rs），
+// 其启用状态与站点列表经后端命令管理，不在此处持久化。
 const OUTPUT_DIR_KEY = 'vidgrab-output-dir'
-// cookieSource: 部分站点解析需浏览器活跃会话 cookie；none = 不使用
-const COOKIE_SOURCE_KEY = 'vidgrab-cookie-source'
-
-type CookieSource = 'none' | 'chrome' | 'edge'
 
 function loadOutputDir(): string {
   try {
@@ -18,19 +16,8 @@ function loadOutputDir(): string {
   }
 }
 
-function loadCookieSource(): CookieSource {
-  try {
-    const v = localStorage.getItem(COOKIE_SOURCE_KEY)
-    if (v === 'chrome' || v === 'edge' || v === 'none') return v
-  } catch {
-    /* 忽略读取失败 */
-  }
-  return 'none'
-}
-
 const outputDir = ref<string>(loadOutputDir())
 const defaultOutputDir = ref<string>('')
-const cookieSource = ref<CookieSource>(loadCookieSource())
 
 const effectiveOutputDir = computed(() => {
   if (outputDir.value) return outputDir.value
@@ -59,15 +46,6 @@ function setOutputDir(path: string) {
   }
 }
 
-function setCookieSource(src: CookieSource) {
-  cookieSource.value = src
-  try {
-    localStorage.setItem(COOKIE_SOURCE_KEY, src)
-  } catch {
-    /* 忽略持久化失败 */
-  }
-}
-
 export function useSettings() {
   return {
     outputDir,
@@ -75,7 +53,5 @@ export function useSettings() {
     effectiveOutputDir,
     loadDefaultOutputDir,
     setOutputDir,
-    cookieSource,
-    setCookieSource,
   }
 }

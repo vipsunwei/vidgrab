@@ -2,6 +2,7 @@
 //! 业务实现按域拆分：downloader（yt-dlp 封装）/ download（下载引擎与命令）/
 //! install（运行时安装器）/ history（持久化命令）/ proc（进程控制原语）/ state（共享状态）。
 
+mod cookies;
 mod downloader;
 mod download;
 mod history;
@@ -117,6 +118,11 @@ pub fn run() {
             download::cancel_download,
             download::delete_task,
             download::clear_task_part,
+            cookies::cookie_store_path,
+            cookies::cookie_store_status,
+            cookies::add_cookie_store,
+            cookies::remove_cookie_group,
+            cookies::clear_cookie_store,
             history::delete_file,
             history::redownload_cleanup,
             history::load_tasks,

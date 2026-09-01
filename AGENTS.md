@@ -82,6 +82,34 @@ Conventional Commits，husky + CI 双重强制：
 `.github/workflows/release.yml` 在三平台矩阵构建 → 产物进草稿 Release → 人工确认后 Publish。
 tag 必须等于 `v` + 应用版本，工作流会校验。
 
+## 样式分层规范
+
+前端样式分四层，自上而下优先级递增，按场景选用：
+
+| 场景 | 做法 |
+|---|---|
+| 组件独有样式（仅本组件用） | `<style scoped>` |
+| 跨组件通用语义样式 | UnoCSS `shortcuts`（首选）或 `src/style.css` |
+| 常规布局 / 间距 / 颜色 / 字号 | UnoCSS 原子类（`flex`、`mt-4`、`text-v-text` 等） |
+| 复杂动画、渐变 + 阴影组合、伪元素 | 手写 CSS（scoped 或 `style.css`） |
+
+约定与权衡：
+
+1. **跨组件通用语义类一律用 `shortcuts`，不要各组件各写一遍手写 CSS。**
+   `shortcuts` 由 UnoCSS 生成唯一一份、天然复用，且**可被原子类覆盖**（调用处可
+   `class="set-hint mt-4"` 微调）。`style.css` 里的类无法被原子类覆盖（优先级问题），
+   会反逼调用方继续写手写 CSS，与"原子类优先"原则相悖。当前 `set-label` / `set-hint` /
+   `set-browse` / `set-input` / `set-save` 均已收敛到 `uno.config.ts` 的 `shortcuts`。
+2. **伪类/状态变体尽量用 UnoCSS 变体表达**（`hover:` / `focus:` / `placeholder:` /
+   `active:`），避免为了 hover 写手写 CSS。条件是显式状态类（如"已保存""确认删除"）才
+   定义成独立 shortcut（如 `set-save-saved`、`set-browse-confirm`），在模板用 `:class` 绑定。
+3. **`style.css` 只放真正的全局基础与 design token**（`:root` 变量、滚动条、`#app` 基础、
+   过渡动画）。零引用的废弃类及时删，不要"保留给未来使用"。
+4. **复杂动画、玻璃模糊（backdrop-filter）、多属性渐变阴影组合**原子类不便表达，允许手写
+   CSS，放在对应组件 `<style scoped>`。这类是分层规范的例外，不是偷懒借口。
+5. 改动样式前先比对各组件现有同名定义，取"出现次数最多且与 design token 一致"的为准，
+   视觉零变化收敛；差异项记入注释。
+
 ## 验证要求
 
 改动完成后至少跑通：`pnpm run build` + `cargo test` + `cargo clippy --all-targets -- -D warnings`

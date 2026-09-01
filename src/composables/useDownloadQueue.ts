@@ -2,7 +2,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { computed, ref, watch } from 'vue'
-import { enhanceCookieError } from '@/utils/format'
 import type { DownloadRecord, DownloadTask } from '@/types'
 
 const MAX_CONCURRENT = 3
@@ -10,8 +9,8 @@ const MAX_CONCURRENT = 3
 const MAX_PERSISTED = 30
 
 interface QueueOptions {
-  /// 传给后端的 cookie 来源，'none' 视为不使用
-  getCookieSource: () => string
+  /// 传给后端的 Cookie 文件路径，空串表示不使用
+  getCookieFile: () => string
   /// 输出目录兜底（任务自带快照优先）
   getOutputDir: () => string
   /// 任务完成：由调用方写入历史记录。
@@ -27,9 +26,9 @@ interface QueueOptions {
   isAlreadyDownloaded: (url: string, qualityTag: string) => boolean
 }
 
-/// 传给后端的 cookie 来源：'none' 表示不使用
-function cookieArg(source: string): string | null {
-  return source === 'none' ? null : source
+/// 传给后端的 cookie 参数：无 Cookie 文件时为 null（后端据此不加 --cookies）
+function cookieArg(path: string): string | null {
+  return path ? path : null
 }
 
 export function useDownloadQueue(options: QueueOptions) {
@@ -102,12 +101,12 @@ export function useDownloadQueue(options: QueueOptions) {
         outputDir: task.outputDir || options.getOutputDir(),
         outputName: task.outputName || null,
         qualityTag: task.qualityTag || null,
-        cookieSource: cookieArg(options.getCookieSource()),
+        cookieSource: cookieArg(options.getCookieFile()),
         taskId: task.id,
       })
     } catch (e) {
       task.status = 'error'
-      task.error = enhanceCookieError(String(e))
+      task.error = String(e)
       pumpQueue()
     }
   }
@@ -361,6 +360,19 @@ export function useDownloadQueue(options: QueueOptions) {
     return null
   }
 
+  /// 删除历史记录时同步移除同会话去重键：记录删了就该允许重新下载，否则 finishedKeys 仍会拦截。
+  function removeFinishedKeys(recs: ReadonlyArray<{ url: string; qualityTag: string }>) {
+    if (!recs.length) return
+    const next = new Set(finishedKeys.value)
+    for (const r of recs) next.delete(dupKey(r.url, r.qualityTag))
+    finishedKeys.value = next
+  }
+
+  /// 清空全部历史时同步清空同会话去重键
+  function clearFinishedKeys() {
+    finishedKeys.value = new Set()
+  }
+
   /// 重新下载：从历史记录原样重建任务并立即入队，跳过 isDuplicate 去重判定
   /// （用户主动要求重下，可能是文件损坏）。调用方需先调后端 redownload_cleanup
   /// 清掉本地成品与碎片。finishedKeys 中的旧键先移除，使本次重下不受同会话已完成态拦截。
@@ -413,6 +425,8 @@ export function useDownloadQueue(options: QueueOptions) {
     removeDoneCards,
     removeDoneCardForRecord,
     isDuplicate,
+    removeFinishedKeys,
+    clearFinishedKeys,
     enqueueFromRecord,
     persist,
     restore,
