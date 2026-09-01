@@ -3,8 +3,11 @@
     <UrlBar v-model="url" :loading="loading" @parse="emit('parse')" />
 
     <p v-if="error" class="error-msg">
-      <span class="i-ph-warning-circle-bold" />
-      {{ error }}
+      <span class="i-ph-warning-circle-bold error-icon" />
+      <span class="error-text">{{ error }}</span>
+      <button class="error-close" type="button" title="关闭" @click="emit('clear-error')">
+        <span class="i-ph-x-bold" />
+      </button>
     </p>
 
     <div class="workspace">
@@ -70,6 +73,7 @@ defineProps<{
 const emit = defineEmits<{
   parse: []
   dismiss: []
+  'clear-error': []
   'select-video': [key: string]
   'select-audio': [key: string]
   'open-settings': []
@@ -97,8 +101,36 @@ const emit = defineEmits<{
   color: var(--v-red);
   font-size: 13px;
   line-height: 1.5;
+}
+.error-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  margin-top: 1px;
+}
+.error-text {
+  flex: 1;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.error-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -1px -4px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--v-radius-xs);
+  background: transparent;
+  color: var(--v-red);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--v-transition);
+}
+.error-close:hover {
+  background: rgba(var(--v-red-rgb), 0.16);
 }
 
 .workspace {

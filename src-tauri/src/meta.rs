@@ -9,6 +9,8 @@ pub struct YtDlpJson {
     pub title: String,
     pub thumbnail: Option<String>,
     pub uploader: Option<String>,
+    /// yt-dlp 的数值型时长（秒），部分站点（如抖音）只返回这个字段
+    pub duration: Option<f64>,
     #[serde(rename = "duration_string")]
     pub duration_str: Option<String>,
     pub formats: Vec<YtDlpFormat>,
@@ -79,8 +81,12 @@ pub fn has_codec(codec: &Option<String>) -> bool {
 }
 
 pub fn parse_video_info(raw: &YtDlpJson, platform: &str) -> VideoInfo {
-    // 计算时长（秒）
-    let duration = raw.duration_str.as_ref().and_then(|s| parse_duration(s)).unwrap_or(0);
+    // 计算时长（秒）：优先用数值 duration，再回退到 duration_string 文本解析
+    let duration = raw
+        .duration
+        .map(|d| d.round() as u32)
+        .or_else(|| raw.duration_str.as_ref().and_then(|s| parse_duration(s)))
+        .unwrap_or(0);
 
     // 缩略图 URL 统一升级为 HTTPS，避免 WebView mixed-content 阻止 HTTP 图片
     let thumbnail = raw
@@ -217,6 +223,7 @@ mod tests {
             title: String::from("测试视频标题"),
             thumbnail: Some(String::from("https://example.com/thumb.jpg")),
             uploader: Some(String::from("测试UP主")),
+            duration: None,
             duration_str: Some(String::from("10:30")),
             formats: vec![
                 YtDlpFormat {
@@ -317,6 +324,7 @@ mod tests {
             title: String::from("无封面视频"),
             thumbnail: None,
             uploader: None,
+            duration: None,
             duration_str: None,
             formats: vec![],
         };
@@ -336,6 +344,7 @@ mod tests {
             title: String::from("音频"),
             thumbnail: None,
             uploader: None,
+            duration: None,
             duration_str: None,
             formats: vec![YtDlpFormat {
                 format_id: String::from("140"),

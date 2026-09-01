@@ -9,8 +9,8 @@ const HISTORY_KEY = 'vidgrab:history'
 const MAX_RECORDS = 50
 
 interface HistoryOptions {
-  /// 删除记录时同步移除中央面板里对应的已完成任务卡片（由调用方注入，避免本域反向依赖任务队列）
-  onRemoveDoneCard?: (rec: { taskId?: string; outputPath?: string }) => void
+  /// 删除记录时同步清理调用方状态（移除已完成卡片、清同会话去重键），由调用方注入，避免本域依赖任务队列
+  onRemoveDoneCard?: (rec: DownloadRecord) => void
   /// 清空历史时一并收起已完成的下载卡片（文件不受影响）
   onClearDoneCards?: () => void
 }
