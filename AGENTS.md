@@ -13,6 +13,7 @@ UI 与错误信息使用中文，新代码保持一致。
 ```bash
 pnpm tauri dev        # 开发
 pnpm run build        # 前端构建（含 app + node 两轮 vue-tsc 类型检查）
+pnpm test:run         # 前端单测（vitest，一次性跑完）
 pnpm tauri build      # 当前平台安装包（Tauri 不能交叉打包）
 cargo test            # 在 src-tauri/ 下执行；全新检出前需先 pnpm run build（generate_context! 需要 dist/）
 pnpm run fetch:binaries  # 拉取当前平台的 yt-dlp 独立版到 src-tauri/bin/
@@ -112,6 +113,6 @@ tag 必须等于 `v` + 应用版本，工作流会校验。
 
 ## 验证要求
 
-改动完成后至少跑通：`pnpm run build` + `cargo test` + `cargo clippy --all-targets -- -D warnings`
-（在 `src-tauri/` 下，31 个单测全过为基线；`#[ignore]` 的集成测试需网络，默认不跑；
+改动完成后至少跑通：`pnpm test:run` + `pnpm run build` + `cargo test` + `cargo clippy --all-targets -- -D warnings`
+（前端 `pnpm test:run` 为 vitest 单测；在 `src-tauri/` 下，所有非 `#[ignore]` 的单测全过为基线；`#[ignore]` 的集成测试需网络，默认不跑；
 clippy 零警告为门槛，CI 三平台均强制执行）。

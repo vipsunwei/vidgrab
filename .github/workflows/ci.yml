@@ -66,6 +66,9 @@ jobs:
       - name: 拉取 yt-dlp / ffmpeg 二进制
         run: pnpm run fetch:binaries
       - run: pnpm run build
+      # 前端单测（vitest）：与后端 cargo test 互补，覆盖平台识别等纯逻辑
+      - name: pnpm test
+        run: pnpm test:run
       # Clippy 三平台各跑一遍：cfg(windows)/cfg(unix) 分支只有对应平台才会编译，
       # 跨平台代码（如进程树击杀）写错时，本机的单一平台编译发现不了。
       # -D warnings 让「死代码/未使用 import」这类问题直接失败，避免在 CI 里悄悄累积。
