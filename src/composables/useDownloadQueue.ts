@@ -5,39 +5,39 @@ import { computed, ref, watch } from 'vue'
 import type { DownloadRecord, DownloadTask } from '@/types'
 
 const MAX_CONCURRENT = 3
-/// 未完成任务持久化上限（任务数组即创建顺序），超出丢弃最旧的，防止无限累积
+// 未完成任务持久化上限（任务数组即创建顺序），超出丢弃最旧的，防止无限累积
 const MAX_PERSISTED = 30
 
 interface QueueOptions {
-  /// 传给后端的 Cookie 文件路径，空串表示不使用
+  // 传给后端的 Cookie 文件路径，空串表示不使用
   getCookieFile: () => string
-  /// 输出目录兜底（任务自带快照优先）
+  // 输出目录兜底（任务自带快照优先）
   getOutputDir: () => string
-  /// 任务完成：由调用方写入历史记录。
-  /// task 可能为 undefined——前端卡片已丢失时（刷新/重启过 dev）仍要按 payload 兜底写历史
+  // 任务完成：由调用方写入历史记录。
+  // task 可能为 undefined——前端卡片已丢失时（刷新/重启过 dev）仍要按 payload 兜底写历史
   onTaskDone: (
     task: DownloadTask | undefined,
     outputPath: string,
     title: string,
     url: string,
   ) => void
-  /// 历史去重：跨会话时前端内存集合已清空，改为查历史记录中是否已存在同视频同画质的成品。
-  /// 由调用方用内存中的 history 数组实现（含重启后从磁盘载入的），避免每次同步判定都走异步 invoke。
+  // 历史去重：跨会话时前端内存集合已清空，改为查历史记录中是否已存在同视频同画质的成品。
+  // 由调用方用内存中的 history 数组实现（含重启后从磁盘载入的），避免每次同步判定都走异步 invoke。
   isAlreadyDownloaded: (url: string, qualityTag: string) => boolean
 }
 
-/// 传给后端的 cookie 参数：无 Cookie 文件时为 null（后端据此不加 --cookies）
+// 传给后端的 cookie 参数：无 Cookie 文件时为 null（后端据此不加 --cookies）
 function cookieArg(path: string): string | null {
   return path ? path : null
 }
 
 export function useDownloadQueue(options: QueueOptions) {
   const tasks = ref<DownloadTask[]>([])
-  /// 已完成任务的去重键集合（url|qualityTag|outputName）。
-  /// 用内存集合而非仅依赖历史记录：历史是异步写入磁盘的，两次极短间隔的点击可能在
-  /// 历史落盘前都查不到对方，造成重复下载。任务完成即刻入集合，可在同一会话内拦截。
+  // 已完成任务的去重键集合（url|qualityTag|outputName）。
+  // 用内存集合而非仅依赖历史记录：历史是异步写入磁盘的，两次极短间隔的点击可能在
+  // 历史落盘前都查不到对方，造成重复下载。任务完成即刻入集合，可在同一会话内拦截。
   const finishedKeys = ref<Set<string>>(new Set())
-  /// 失败卡片上「删除」的二次确认（3 秒内再点才生效）
+  // 失败卡片上「删除」的二次确认（3 秒内再点才生效）
   const armedDeleteId = ref<string | null>(null)
   let armedDeleteTimer: number | null = null
 
@@ -122,7 +122,7 @@ export function useDownloadQueue(options: QueueOptions) {
     pumpQueue()
   }
 
-  /// 暂停：终止进程但保留 .part 断点，等「继续下载」时自动续传
+  // 暂停：终止进程但保留 .part 断点，等「继续下载」时自动续传
   function pauseTask(id: string) {
     const task = findTask(id)
     if (!task) return
@@ -133,7 +133,7 @@ export function useDownloadQueue(options: QueueOptions) {
     pumpQueue()
   }
 
-  /// 继续：同参数重新发起下载，yt-dlp 检测同名 .part 自动断点续传
+  // 继续：同参数重新发起下载，yt-dlp 检测同名 .part 自动断点续传
   function resumeTask(id: string) {
     const task = findTask(id)
     if (!task) return
@@ -142,8 +142,8 @@ export function useDownloadQueue(options: QueueOptions) {
     void startOne(task)
   }
 
-  /// 取消/出错后的重新下载：先清掉该任务已下载的 .part 碎片，再用原参数从头下载，
-  /// 不续传——「重新下载」语义就是换一份，续传那段可能已损坏的半成品没有意义。
+  // 取消/出错后的重新下载：先清掉该任务已下载的 .part 碎片，再用原参数从头下载，
+  // 不续传——「重新下载」语义就是换一份，续传那段可能已损坏的半成品没有意义。
   async function restartTask(id: string) {
     const task = findTask(id)
     if (!task) return
@@ -155,7 +155,7 @@ export function useDownloadQueue(options: QueueOptions) {
     void startOne(task)
   }
 
-  /// 删除：进行中/暂停中会终止进程并清理 .part 残留；已完成仅移除卡片（不动成品文件）
+  // 删除：进行中/暂停中会终止进程并清理 .part 残留；已完成仅移除卡片（不动成品文件）
   function deleteTask(id: string) {
     const task = findTask(id)
     if (!task) return
@@ -167,7 +167,7 @@ export function useDownloadQueue(options: QueueOptions) {
     pumpQueue()
   }
 
-  /// 失败卡片上的「删除」需要二次确认，避免误删已下载的 .part 进度
+  // 失败卡片上的「删除」需要二次确认，避免误删已下载的 .part 进度
   function armDelete(id: string) {
     if (armedDeleteId.value === id) {
       armedDeleteId.value = null
@@ -180,7 +180,7 @@ export function useDownloadQueue(options: QueueOptions) {
     armedDeleteTimer = window.setTimeout(() => (armedDeleteId.value = null), 3000)
   }
 
-  /// 解析新链接时清理旧的失败/取消任务，避免旧报错一直占着界面
+  // 解析新链接时清理旧的失败/取消任务，避免旧报错一直占着界面
   function clearFailed() {
     tasks.value = tasks.value.filter(
       (t) => t.status !== 'error' && t.status !== 'cancelled',
@@ -191,7 +191,7 @@ export function useDownloadQueue(options: QueueOptions) {
     tasks.value = tasks.value.filter((t) => t.status !== 'done')
   }
 
-  /// 删除历史记录后同步移除对应已完成卡片，否则点「打开文件」会因文件已删而报错
+  // 删除历史记录后同步移除对应已完成卡片，否则点「打开文件」会因文件已删而报错
   function removeDoneCardForRecord(rec: { taskId?: string; outputPath?: string }) {
     tasks.value = tasks.value.filter(
       (t) =>
@@ -224,7 +224,7 @@ export function useDownloadQueue(options: QueueOptions) {
     },
   )
 
-  /// 恢复上次退出时的未完成任务：进程已不在，统一标记为已暂停
+  // 恢复上次退出时的未完成任务：进程已不在，统一标记为已暂停
   async function restore() {
     try {
       // 后端返回 JSON 字符串（与 load_history 同模式），必须先 parse
@@ -271,8 +271,9 @@ export function useDownloadQueue(options: QueueOptions) {
         t.stage = stage as DownloadTask['stage']
         t.speed = speed
         t.eta = eta
-        // 断网重试提示事件（speed 位为「网络重试 x/x」）progress 为 0，不能打回进度条
-        if (!speed.startsWith('网络重试')) {
+        // progress 为 0 的都是提示类事件（网络重试、断点失效重建、合并开始），
+        // 不是真实进度，写进去会把进度条打回 0。按数值判断比逐个匹配提示文案稳
+        if (progress > 0) {
           if (stage === 'video') t.videoProgress = progress
           if (stage === 'audio') t.audioProgress = progress
           if (stage === 'merge') t.mergeProgress = progress
@@ -339,9 +340,9 @@ export function useDownloadQueue(options: QueueOptions) {
     if (armedDeleteTimer) window.clearTimeout(armedDeleteTimer)
   }
 
-  /// 去重判定：同一会话内已完成的同视频同画质、历史记录里已存在的同键成品，
-  /// 或队列中仍在占用的同键任务。返回命中原因，null 表示不重复。
-  /// App.vue 在入队前调用，避免无提示重复下载；「重新下载」走专用入口，不经过此判定。
+  // 去重判定：同一会话内已完成的同视频同画质、历史记录里已存在的同键成品，
+  // 或队列中仍在占用的同键任务。返回命中原因，null 表示不重复。
+  // App.vue 在入队前调用，避免无提示重复下载；「重新下载」走专用入口，不经过此判定。
   function isDuplicate(url: string, qualityTag: string): string | null {
     const key = dupKey(url, qualityTag)
     if (finishedKeys.value.has(key)) {
@@ -360,7 +361,7 @@ export function useDownloadQueue(options: QueueOptions) {
     return null
   }
 
-  /// 删除历史记录时同步移除同会话去重键：记录删了就该允许重新下载，否则 finishedKeys 仍会拦截。
+  // 删除历史记录时同步移除同会话去重键：记录删了就该允许重新下载，否则 finishedKeys 仍会拦截。
   function removeFinishedKeys(recs: ReadonlyArray<{ url: string; qualityTag: string }>) {
     if (!recs.length) return
     const next = new Set(finishedKeys.value)
@@ -368,14 +369,14 @@ export function useDownloadQueue(options: QueueOptions) {
     finishedKeys.value = next
   }
 
-  /// 清空全部历史时同步清空同会话去重键
+  // 清空全部历史时同步清空同会话去重键
   function clearFinishedKeys() {
     finishedKeys.value = new Set()
   }
 
-  /// 重新下载：从历史记录原样重建任务并立即入队，跳过 isDuplicate 去重判定
-  /// （用户主动要求重下，可能是文件损坏）。调用方需先调后端 redownload_cleanup
-  /// 清掉本地成品与碎片。finishedKeys 中的旧键先移除，使本次重下不受同会话已完成态拦截。
+  // 重新下载：从历史记录原样重建任务并立即入队，跳过 isDuplicate 去重判定
+  // （用户主动要求重下，可能是文件损坏）。调用方需先调后端 redownload_cleanup
+  // 清掉本地成品与碎片。finishedKeys 中的旧键先移除，使本次重下不受同会话已完成态拦截。
   function enqueueFromRecord(rec: DownloadRecord) {
     const key = dupKey(rec.url, rec.qualityTag)
     if (finishedKeys.value.has(key)) {

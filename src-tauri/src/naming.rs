@@ -64,17 +64,24 @@ pub fn sanitize_filename(name: &str) -> String {
 }
 
 
+// 文件名是否属于该标题：以 title 开头，且紧跟的字符必须是 '.'。
+// 裸 starts_with 会让 "cat" 命中 "cat 2.mp4" / "cat [720P].mp4"，并发下载时就拿错成品，
+// 双轨路径还会把别人的中间文件 remove_file 掉。项目里几处碎片清理都用 "{prefix}." 带点前缀，
+// 这里原本漏了那一个点。
+fn belongs_to_title(name: &str, title: &str) -> bool {
+    name.strip_prefix(title).is_some_and(|rest| rest.starts_with('.'))
+}
+
 pub fn find_latest_in_dir(dir: &PathBuf, title: &str, suffix: &str) -> Result<String, String> {
     let entries =
         std::fs::read_dir(dir).map_err(|e| format!("读取目录失败: {}", e))?;
 
-    // 用前缀匹配而非 contains：避免同系列标题互含时错拿其他任务的文件
     let mut candidates: Vec<_> = entries
         .filter_map(|e| e.ok())
         .filter(|e| {
             let binding = e.file_name();
             let name = binding.to_string_lossy();
-            name.starts_with(title) && (suffix.is_empty() || name.contains(suffix))
+            belongs_to_title(&name, title) && (suffix.is_empty() || name.contains(suffix))
         })
         .collect();
 
@@ -140,5 +147,44 @@ mod tests {
         let title = "25K views · 646 reactions _ As fishing guides here in Alaska, we get to share some pretty incredible moments with clients—but watching a Kodiak brown bear chase down a red salmon right in front of us was something special. ".repeat(3);
         let out2 = sanitize_filename(&title);
         assert!(out2.chars().count() <= 150);
+    }
+
+    #[test]
+    fn find_latest_in_dir_requires_title_boundary() {
+        // "cat" 不该命中 "cat 2.mp4" / "cat [720P].mp4"，否则并发下载会拿错别人的成品
+        let dir = std::env::temp_dir().join(format!("vidgrab_find_boundary_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("cat.mp4"), "a").unwrap();
+        std::fs::write(dir.join("cat 2.mp4"), "b").unwrap();
+        std::fs::write(dir.join("cat [720P].mp4"), "c").unwrap();
+
+        let found = find_latest_in_dir(&dir, "cat", "").unwrap();
+        let name = std::path::Path::new(&found)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(name, "cat.mp4");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_latest_in_dir_track_suffix_excludes_other_title() {
+        // 双轨取 .v. 轨同理：拿错的话合并后会被 remove_file 删掉
+        let dir = std::env::temp_dir().join(format!("vidgrab_find_suffix_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("cat.v.webm"), "a").unwrap();
+        std::fs::write(dir.join("cat 2.v.webm"), "b").unwrap();
+
+        let found = find_latest_in_dir(&dir, "cat", ".v.").unwrap();
+        let name = std::path::Path::new(&found)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(name, "cat.v.webm");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

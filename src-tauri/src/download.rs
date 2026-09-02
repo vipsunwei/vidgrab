@@ -137,7 +137,7 @@ pub async fn run_download_task(
             let vid_path = find_latest_in_dir(&output_dir, &safe_title, ".v.")?;
             let aud_path = find_latest_in_dir(&output_dir, &safe_title, ".a.")?;
 
-            merge_with_ffmpeg(
+            if let Err(e) = merge_with_ffmpeg(
                 &vid_path,
                 &aud_path,
                 &merged,
@@ -146,7 +146,13 @@ pub async fn run_download_task(
                 &task_id,
                 &tasks,
             )
-            .await?;
+            .await
+            {
+                // 合并没走完，{base}.mp4 是个残缺文件。留着它，下次同一标题的任务
+                // 会被 find_latest_in_dir 按 mtime 优先捡成「成品」，必须删
+                let _ = std::fs::remove_file(&merged);
+                return Err(e);
+            }
 
             let _ = std::fs::remove_file(&vid_path);
             let _ = std::fs::remove_file(&aud_path);
@@ -213,6 +219,12 @@ pub async fn run_download_task(
         // 成功后输出位置已无用（.part 已被消费/删除），仅失败、暂停、取消时保留供删除清理
         if success {
             task_outputs.0.lock().unwrap().remove(&task_id);
+        } else if !paused {
+            // 取消/失败：清掉双轨中间文件。暂停要留着续传，见 clean_track_files 注释
+            let out = task_outputs.0.lock().unwrap().get(&task_id).cloned();
+            if let Some((dir, prefix)) = out {
+                clean_track_files(&dir, &prefix);
+            }
         }
     } else {
         // 旧运行只清走与自身代号匹配的标记，不碰新运行的状态
@@ -278,6 +290,25 @@ fn clean_part_fragments(dir: &std::path::Path, prefix: &str) {
     }
 }
 
+// 清理双轨中间文件（{prefix}.v.* / {prefix}.a.*）。
+// 只在取消/失败时调：暂停得留着，那是断点续传的原料。
+fn clean_track_files(dir: &std::path::Path, prefix: &str) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let base_prefix = format!("{prefix}.");
+    for e in entries.filter_map(|e| e.ok()) {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(rest) = name.strip_prefix(&base_prefix) else {
+            continue;
+        };
+        // 只认双轨后缀，别碰成品（{prefix}.mp4）
+        if rest.starts_with("v.") || rest.starts_with("a.") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// 删除任务：若仍在下载则终止进程，并清理该任务已下载的 .part 残留文件。
 /// （.part 按输出目录 + 文件名前缀匹配，不会误删其他任务或历史成品）
 #[tauri::command]
@@ -297,16 +328,18 @@ pub async fn delete_task(
         stop_task(&tasks, &task_id).await;
     }
     let out = task_outputs.inner().0.lock().unwrap().remove(&task_id);
-    async move {
-        // 进程终止后文件句柄释放需要一点时间，稍等再删
-        if running {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        }
-        if let Some((dir, prefix)) = out {
-            clean_part_fragments(&dir, &prefix);
-        }
+    if out.is_some() {
+        // 进程终止后文件句柄释放需要一点时间，稍等再删。挪到后台跑，
+        // 不然命令要挂满这半秒才回包，删除按钮按下去是粘的
+        tokio::spawn(async move {
+            if running {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+            if let Some((dir, prefix)) = out {
+                clean_part_fragments(&dir, &prefix);
+            }
+        });
     }
-    .await;
     Ok(())
 }
 

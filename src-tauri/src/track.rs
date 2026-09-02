@@ -8,7 +8,7 @@ use tokio::io::BufReader;
 use tokio::process::Command;
 
 use crate::downloader::{find_ffmpeg, push_cookie_args};
-use crate::proc::{force_utf8_env, hide_window_tokio, read_line_lossy};
+use crate::proc::{force_utf8_env, hide_window_tokio, kill_pid_tree, read_line_lossy};
 #[cfg(windows)]
 use crate::proc::attach_kill_on_close_job;
 use crate::progress::{emit_progress, parse_ffmpeg_time, parse_progress_line};
@@ -43,14 +43,29 @@ pub fn is_network_error(msg: &str) -> bool {
         "unable to download webpage",
         "network is down",
         "network is unreachable",
-        "10054",
-        "10060",
         "read error",
         "incomplete read",
         "http error 500",
         "http error 502",
         "http error 503",
         "precondition failed",
+    ]
+    .iter()
+    .any(|k| m.contains(k))
+        || has_winsock_code(&m)
+}
+
+// Windows socket 错误码（10054 连接被重置 / 10060 连接超时）。
+// 裸匹配数字会误伤：文件大小、时长里恰好出现同串数字也会被当成网络错误，白等满 6 次退避。
+// 所以要求它们以 errno / winerror / Python 异常元组的形式出现才算数
+fn has_winsock_code(m: &str) -> bool {
+    [
+        "errno 10054",
+        "winerror 10054",
+        "(10054,",
+        "errno 10060",
+        "winerror 10060",
+        "(10060,",
     ]
     .iter()
     .any(|k| m.contains(k))
@@ -210,7 +225,7 @@ pub async fn run_ytdlp_with_progress(
         output_template.to_string(),
     ];
     if let Some(src) = cookie_source {
-        if !src.is_empty() && src != "none" {
+        if !src.is_empty() {
             // 与解析路径共用 push_cookie_args
             push_cookie_args(&mut args, src);
         }
@@ -247,6 +262,21 @@ pub async fn run_ytdlp_with_progress(
 
     // 登记子进程 PID（停止时树杀用）；子进程对象由本任务独占，不共享互斥锁
     tasks.lock().await.insert(task_id.to_string(), pid);
+    // 补第二道检查：spawn 到 PID 登记之间有个窗口，用户恰好在这瞬间点的暂停/取消，
+    // stop_task 查表时还没有这个 PID，就杀不掉，yt-dlp 会一路跑到下载完成
+    if let Some(p) = pid {
+        let paused = is_paused(pausing, task_id, seq).await;
+        let cancelled = is_cancelled(cancelling, task_id, seq).await;
+        if paused || cancelled {
+            kill_pid_tree(p).await;
+            let _ = child.wait().await;
+            return Err(if paused {
+                "__paused__".to_string()
+            } else {
+                "__cancelled__".to_string()
+            });
+        }
+    }
     // 应用退出时自动终止下载进程树（见 attach_kill_on_close_job 注释）
     #[cfg(windows)]
     attach_kill_on_close_job(&child);
@@ -429,5 +459,39 @@ pub async fn merge_with_ffmpeg(
 
     emit_progress(app, task_id, "merge", 100.0, "-".into(), "-".into(), "Merging...".into());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_error_matches_real_network_failures() {
+        assert!(is_network_error("Connection reset by peer"));
+        assert!(is_network_error("[Errno 10054] 远程主机强迫关闭"));
+        assert!(is_network_error("ConnectionResetError(10054, 'x', None, 10054, None)"));
+        assert!(is_network_error("[WinError 10060] A connection attempt failed"));
+    }
+
+    #[test]
+    fn network_error_ignores_bare_numbers() {
+        // 文件大小、时长里恰好带这几位数字，不该被当成网络错误白等满 6 次退避
+        assert!(!is_network_error("downloading 10054 bytes"));
+        assert!(!is_network_error("duration 10060 seconds"));
+    }
+
+    #[test]
+    fn network_error_excludes_permanent_failures() {
+        // 这几类重试也没用，必须判为非网络错误直接失败
+        assert!(!is_network_error("HTTP Error 404: Not Found"));
+        assert!(!is_network_error("Private video"));
+        assert!(!is_network_error("Video unavailable"));
+    }
+
+    #[test]
+    fn unsatisfiable_range_detected() {
+        assert!(is_unsatisfiable_range("HTTP Error 416: Requested Range Not Satisfiable"));
+        assert!(!is_unsatisfiable_range("HTTP Error 404"));
+    }
 }
 
