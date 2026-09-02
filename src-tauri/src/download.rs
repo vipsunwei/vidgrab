@@ -223,7 +223,7 @@ pub async fn run_download_task(
             // 取消/失败：清掉双轨中间文件。暂停要留着续传，见 clean_track_files 注释
             let out = task_outputs.0.lock().unwrap().get(&task_id).cloned();
             if let Some((dir, prefix)) = out {
-                clean_track_files(&dir, &prefix);
+                clean_all_fragments(&dir, &prefix);
             }
         }
     } else {
@@ -272,38 +272,28 @@ pub async fn pause_download(
     Ok(())
 }
 
-/// 清理某任务输出目录中以 {prefix}. 开头、且为 .part / .part-Frag 的临时碎片。
+/// 清理某任务输出目录中的临时碎片：以 {prefix}. 开头，且属于以下任一：
+/// - 双轨中间文件（{prefix}.v.* / {prefix}.a.*）
+/// - 单轨/双轨的 .part 断点（含 yt-dlp 分片 .part-FragN）
 /// 不碰成品（{prefix}.mp4 等），也不会误删其他任务（前缀含任务专属的 quality tag）。
-/// delete_task 与 clear_task_part 共用，避免逻辑重复。
-fn clean_part_fragments(dir: &std::path::Path, prefix: &str) {
+/// 取消/失败与显式删除（delete_task / clear_task_part）统一调用，避免单轨 .part 漏清。
+/// 暂停时不调本函数——那是断点续传的原料，要留着。
+fn clean_all_fragments(dir: &std::path::Path, prefix: &str) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     let base_prefix = format!("{prefix}.");
     for e in entries.filter_map(|e| e.ok()) {
         let name = e.file_name().to_string_lossy().to_string();
-        if name.starts_with(&base_prefix)
-            && (name.ends_with(".part") || name.contains(".part-Frag"))
-        {
-            let _ = std::fs::remove_file(e.path());
-        }
-    }
-}
-
-// 清理双轨中间文件（{prefix}.v.* / {prefix}.a.*）。
-// 只在取消/失败时调：暂停得留着，那是断点续传的原料。
-fn clean_track_files(dir: &std::path::Path, prefix: &str) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let base_prefix = format!("{prefix}.");
-    for e in entries.filter_map(|e| e.ok()) {
-        let name = e.file_name().to_string_lossy().to_string();
-        let Some(rest) = name.strip_prefix(&base_prefix) else {
+        if !name.starts_with(&base_prefix) {
             continue;
-        };
-        // 只认双轨后缀，别碰成品（{prefix}.mp4）
-        if rest.starts_with("v.") || rest.starts_with("a.") {
+        }
+        let after = &name[base_prefix.len()..];
+        // 双轨中间文件
+        let is_track = after.starts_with("v.") || after.starts_with("a.");
+        // 单轨 .part / 双轨分片 .part-FragN
+        let is_part = name.ends_with(".part") || name.contains(".part-Frag");
+        if is_track || is_part {
             let _ = std::fs::remove_file(e.path());
         }
     }
@@ -336,7 +326,7 @@ pub async fn delete_task(
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
             if let Some((dir, prefix)) = out {
-                clean_part_fragments(&dir, &prefix);
+                clean_all_fragments(&dir, &prefix);
             }
         });
     }
@@ -352,7 +342,7 @@ pub async fn clear_task_part(
 ) -> Result<(), String> {
     let out = task_outputs.inner().0.lock().unwrap().get(&task_id).cloned();
     if let Some((dir, prefix)) = out {
-        clean_part_fragments(&dir, &prefix);
+        clean_all_fragments(&dir, &prefix);
     }
     Ok(())
 }
