@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.node.json && vite build",
     "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run",
     "tauri": "tauri",
     "fetch:binaries": "node scripts/fetch-binaries.ts",
     "prepare": "husky"
@@ -29,6 +31,7 @@
     "typescript": "~6.0.3",
     "unocss": "^66.8.1",
     "vite": "^8.2.2",
+    "vitest": "3.2.0",
     "vue-tsc": "^3.3.11"
   },
   "packageManager": "pnpm@11.24.0"
