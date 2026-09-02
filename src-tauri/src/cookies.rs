@@ -5,7 +5,7 @@
 //! （页面会带出 CDN、埋点等无关域名，暴露它们只会造成心智负担）。
 
 use std::collections::{HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -225,6 +225,22 @@ pub async fn cookie_store_status(app: AppHandle) -> Result<CookieStoreStatus, St
 pub async fn add_cookie_store(app: AppHandle, source: String) -> Result<String, String> {
     if source.is_empty() {
         return Err("未选择 Cookie 文件".to_string());
+    }
+    // 防御性校验：只接受真实存在的 .txt 文件且大小合理，
+    // 避免命令被（如被 XSS 注入的脚本）借机读取本机任意路径或超大文件。
+    // 内容合法性仍由下方 parse_entries 兜底（解析不出合法 cookie 即拒绝）。
+    let src_path = Path::new(&source);
+    if !src_path.is_file() {
+        return Err("Cookie 文件不存在".to_string());
+    }
+    if !source.to_lowercase().ends_with(".txt") {
+        return Err("Cookie 文件必须是 .txt（Netscape 格式）".to_string());
+    }
+    if let Ok(meta) = std::fs::metadata(&source) {
+        const MAX_COOKIE_FILE: u64 = 16 * 1024 * 1024; // 16MB
+        if meta.len() > MAX_COOKIE_FILE {
+            return Err("Cookie 文件过大（上限 16MB）".to_string());
+        }
     }
     let source_text = read_text(&source)?;
     // 空文件或纯注释文件视为无效导出
