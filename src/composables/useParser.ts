@@ -7,7 +7,7 @@ import type { DownloadMode, FormatInfo, TrackCapsule, VideoMetadata } from '@/ty
 const LAST_URL_KEY = 'vidgrab-last-url'
 const LAST_PARSE_KEY = 'vidgrab-last-parse'
 
-/// 传给后端的 cookie 参数：无 Cookie 文件时为 null（后端据此不加 --cookies）
+// 传给后端的 cookie 参数：无 Cookie 文件时为 null（后端据此不加 --cookies）
 function cookieArg(path: string): string | null {
   return path ? path : null
 }
@@ -39,7 +39,7 @@ export function useParser(getCookieFile: () => string) {
   const hasVideo = (f: FormatInfo) => hasVideoStream(f.vcodec)
   const hasAudio = (f: FormatInfo) => hasAudioStream(f.acodec)
 
-  /// 同分辨率去重时的 codec 优先级：avc1 兼容性最好，优先
+  // 同分辨率去重时的 codec 优先级：avc1 兼容性最好，优先
   function codecRank(vcodec: string): number {
     const c = vcodec.toLowerCase()
     if (c.startsWith('avc1')) return 0
@@ -49,7 +49,7 @@ export function useParser(getCookieFile: () => string) {
     return 9
   }
 
-  /// 视频轨：按分辨率降序，同高度只保留 codec 最优的一条
+  // 视频轨：按分辨率降序，同高度只保留 codec 最优的一条
   const videoTracks = computed<FormatInfo[]>(() => {
     if (!metadata.value?.formats) return []
     const list = metadata.value.formats
@@ -80,7 +80,7 @@ export function useParser(getCookieFile: () => string) {
     )
   })
 
-  /// 音频轨：按码率降序，无码率时按体积降序
+  // 音频轨：按码率降序，无码率时按体积降序
   const audioTracks = computed<FormatInfo[]>(() => {
     if (!metadata.value?.formats) return []
     return metadata.value.formats
@@ -115,7 +115,7 @@ export function useParser(getCookieFile: () => string) {
       null,
   )
 
-  /// 下载模式由「选了哪些轨」推导
+  // 下载模式由「选了哪些轨」推导
   const downloadMode = computed<DownloadMode>(() => {
     if (selVideo.value && !selAudio.value) return 'video'
     if (!selVideo.value && selAudio.value) return 'audio'
@@ -147,7 +147,7 @@ export function useParser(getCookieFile: () => string) {
     }),
   )
 
-  /// 音频按码率档位分组，每档只留码率最高的一条
+  // 音频按码率档位分组，每档只留码率最高的一条
   const audioCapsules = computed<TrackCapsule[]>(() => {
     const groups = new Map<string, FormatInfo>()
     for (const f of audioTracks.value) {
@@ -206,7 +206,7 @@ export function useParser(getCookieFile: () => string) {
     selAudio.value = selAudio.value === formatId ? '' : formatId
   }
 
-  /// 解析成功后默认填入视频标题（不含扩展名，扩展名由后端按格式自动补），用户可改
+  // 解析成功后默认填入视频标题（不含扩展名，扩展名由后端按格式自动补），用户可改
   function fillDefaultOutputName() {
     if (!metadata.value) return
     const base = metadata.value.title.replace(/[\\/:*?"<>|]/g, '_')
@@ -283,7 +283,7 @@ export function useParser(getCookieFile: () => string) {
     }
   }
 
-  /// 收起解析卡片（保留 URL，方便换链接重新解析）
+  // 收起解析卡片（保留 URL，方便换链接重新解析）
   function dismiss() {
     metadata.value = null
     selVideo.value = ''

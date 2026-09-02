@@ -14,7 +14,7 @@ export function useFfmpegSetup() {
 
   let unlisten: UnlistenFn | null = null
 
-  /// 缺 ffmpeg 时弹出引导；已安装则静默
+  // 缺 ffmpeg 时弹出引导；已安装则静默
   async function detect() {
     try {
       const sys = await invoke<{ yt_dlp: boolean; ffmpeg: boolean }>('check_system')

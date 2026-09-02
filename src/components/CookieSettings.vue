@@ -48,7 +48,7 @@ const emit = defineEmits<{
   'clear-cookie': []
 }>()
 
-/// 清空的二次确认：第一次点进入确认态，3 秒内再点才真正清除
+// 清空的二次确认：第一次点进入确认态，3 秒内再点才真正清除
 const clearArmed = ref(false)
 let clearTimer: ReturnType<typeof setTimeout> | undefined
 

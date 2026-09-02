@@ -326,7 +326,7 @@ const {
 } = parser
 
 // 解析动作
-/// 关闭解析报错提示
+// 关闭解析报错提示
 function clearParseError() {
   error.value = ''
 }
@@ -444,8 +444,7 @@ async function openHistoryFolder(path: string) {
   if (!path) return
   await safeOpen(() => revealItemInDir(path), '打开文件夹失败')
 }
-
-/// 打开本地资源失败时明确提示用户（如文件已被删除），不再静默吞掉错误
+// 打开本地资源失败时明确提示用户（如文件已被删除），不再静默吞掉错误
 async function safeOpen(action: () => Promise<unknown>, label: string) {
   try {
     await action()
@@ -529,8 +528,7 @@ function saveSettingsPage() {
     pageSaved.value = false
   }, 1500)
 }
-
-/// 目录草稿落盘：填了默认路径或留空都视为「使用默认」
+// 目录草稿落盘：填了默认路径或留空都视为「使用默认」
 function applyOutputDirDraft() {
   const draft = settingsDraft.value.trim()
   if (draft === defaultOutputDir.value || draft === '') {
@@ -553,8 +551,7 @@ async function pickOutputDir() {
     console.error('选择目录失败:', e)
   }
 }
-
-/// 选择导出的 cookies.txt 加入固定存储：站点名由文件域名自动识别，同站点再添加即整站更新。
+// 选择导出的 cookies.txt 加入固定存储：站点名由文件域名自动识别，同站点再添加即整站更新。
 async function addCookieStore() {
   try {
     const selected = await open({
@@ -571,8 +568,7 @@ async function addCookieStore() {
     showToast(String(e))
   }
 }
-
-/// 删除单个站点的全部 Cookie（站点标签上的 × 按钮）
+// 删除单个站点的全部 Cookie（站点标签上的 × 按钮）
 async function removeCookieGroup(group: string) {
   try {
     await invoke('remove_cookie_group', { group })
@@ -582,8 +578,7 @@ async function removeCookieGroup(group: string) {
     showToast(String(e))
   }
 }
-
-/// 清空 Cookie 固定存储（清除按钮二次确认后调用）
+// 清空 Cookie 固定存储（清除按钮二次确认后调用）
 async function clearCookieStore() {
   try {
     await invoke('clear_cookie_store')
@@ -612,8 +607,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   if (showFfmpegModal.value) return (showFfmpegModal.value = false)
   if (showDepDialog.value) return (showDepDialog.value = false)
 }
-
-/// 点击空白处关闭历史记录的删除菜单
+// 点击空白处关闭历史记录的删除菜单
 function onDocClick(e: MouseEvent) {
   if (!activeMenuId.value) return
   const t = e.target as HTMLElement | null

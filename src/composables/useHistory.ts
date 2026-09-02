@@ -9,15 +9,15 @@ const HISTORY_KEY = 'vidgrab:history'
 const MAX_RECORDS = 50
 
 interface HistoryOptions {
-  /// 删除记录时同步清理调用方状态（移除已完成卡片、清同会话去重键），由调用方注入，避免本域依赖任务队列
+  // 删除记录时同步清理调用方状态（移除已完成卡片、清同会话去重键），由调用方注入，避免本域依赖任务队列
   onRemoveDoneCard?: (rec: DownloadRecord) => void
-  /// 清空历史时一并收起已完成的下载卡片（文件不受影响）
+  // 清空历史时一并收起已完成的下载卡片（文件不受影响）
   onClearDoneCards?: () => void
 }
 
 export function useHistory(options: HistoryOptions = {}) {
   const history = ref<DownloadRecord[]>([])
-  /// 当前展开删除菜单的记录 id（统一管理，切换页面时自动关闭）
+  // 当前展开删除菜单的记录 id（统一管理，切换页面时自动关闭）
   const activeMenuId = ref<string | null>(null)
 
   const todayHistory = computed(() => history.value.filter((h) => isToday(h.createdAt)))
@@ -85,7 +85,7 @@ export function useHistory(options: HistoryOptions = {}) {
     void save()
   }
 
-  /// 仅删除记录（保留本地文件）
+  // 仅删除记录（保留本地文件）
   function deleteRecordOnly(id: string) {
     activeMenuId.value = null
     const rec = history.value.find((h) => h.id === id)
@@ -93,7 +93,7 @@ export function useHistory(options: HistoryOptions = {}) {
     if (rec) options.onRemoveDoneCard?.(rec)
   }
 
-  /// 删除记录并删除本地文件
+  // 删除记录并删除本地文件
   async function deleteRecordAndFile(id: string) {
     activeMenuId.value = null
     const rec = history.value.find((h) => h.id === id)
@@ -109,11 +109,11 @@ export function useHistory(options: HistoryOptions = {}) {
     if (rec) options.onRemoveDoneCard?.(rec)
   }
 
-  /// 清空模式：null 未激活；'record' 仅删记录；'files' 删记录并删本地文件
+  // 清空模式：null 未激活；'record' 仅删记录；'files' 删记录并删本地文件
   const clearConfirm = ref<null | 'record' | 'files'>(null)
   let clearTimer: ReturnType<typeof setTimeout> | undefined
 
-  /// 二次确认式清空：第一次点进入对应模式确认态，3 秒内再点同模式才真正执行，防止误删（尤其删文件）
+  // 二次确认式清空：第一次点进入对应模式确认态，3 秒内再点同模式才真正执行，防止误删（尤其删文件）
   function clear(mode: 'record' | 'files') {
     if (clearConfirm.value === mode) {
       clearConfirm.value = null
@@ -132,7 +132,7 @@ export function useHistory(options: HistoryOptions = {}) {
     clearTimer = setTimeout(() => (clearConfirm.value = null), 3000)
   }
 
-  /// 清空记录并删除所有本地文件：逐条调后端 delete_file（文件不存在视为成功），再清记录
+  // 清空记录并删除所有本地文件：逐条调后端 delete_file（文件不存在视为成功），再清记录
   async function clearWithFiles() {
     const paths = history.value.map((h) => h.outputPath).filter(Boolean)
     await Promise.all(
