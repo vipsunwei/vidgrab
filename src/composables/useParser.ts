@@ -80,9 +80,13 @@ export function useParser(getCookieFile: () => string) {
     )
   })
 
-  // 音频轨：按码率降序，无码率时按体积降序
+  // 音频轨：优先 mp4 兼容（aac/m4a），同组内按码率/体积降序。
+  // 合并走 -c:a copy 零重编码，故默认倾向可直接 copy 的音频源；
+  // 无兼容源时回退最高码率（后端会兜底重编码为 aac）。
   const audioTracks = computed<FormatInfo[]>(() => {
     if (!metadata.value?.formats) return []
+    const isMp4Audio = (f: FormatInfo) =>
+      (f.acodec || '').toLowerCase().includes('mp4a') || (f.ext || '') === 'm4a'
     return metadata.value.formats
       .filter((f) => {
         const note = (f.format_note || '').toLowerCase()
@@ -90,6 +94,9 @@ export function useParser(getCookieFile: () => string) {
         return isAudioOnly(f)
       })
       .sort((a, b) => {
+        const aMp4 = isMp4Audio(a) ? 1 : 0
+        const bMp4 = isMp4Audio(b) ? 1 : 0
+        if (aMp4 !== bMp4) return bMp4 - aMp4
         const abrDiff = (b.abr || 0) - (a.abr || 0)
         if (abrDiff !== 0) return abrDiff
         return (b.filesize || 0) - (a.filesize || 0)

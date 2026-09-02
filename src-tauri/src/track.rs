@@ -354,6 +354,13 @@ pub async fn run_ytdlp_with_progress(
     Ok(())
 }
 
+/// 判断音频编码是否可直接 copy 进 mp4 容器（零重编码）。
+/// mp4a 系列（如 mp4a.40.2）与裸 "aac" 都算；opus/mp3 等需兜底重编码为 aac。
+pub fn is_mp4_compatible_audio(codec: &str) -> bool {
+    let c = codec.to_lowercase();
+    c.contains("mp4a") || c == "aac"
+}
+
 pub async fn merge_with_ffmpeg(
     video_path: &str,
     audio_path: &str,
@@ -362,6 +369,7 @@ pub async fn merge_with_ffmpeg(
     app: &AppHandle,
     task_id: &str,
     tasks: &TaskTable,
+    audio_codec: &str,
 ) -> Result<(), String> {
     let ffmpeg =
         find_ffmpeg().ok_or_else(|| "未找到 ffmpeg（打包版本异常）".to_string())?;
@@ -376,25 +384,20 @@ pub async fn merge_with_ffmpeg(
         std_spawn.process_group(0);
     }
     let mut spawn = Command::from(std_spawn);
-    spawn.args([
-        "-y",
-        "-i",
-        video_path,
-        "-i",
-        audio_path,
-        "-c:v",
-        "copy",
-        "-c:a",
-        "aac",
-        "-strict",
-        "experimental",
-        // 若视频轨因断点续传损坏而略短于音频轨，-shortest 让输出在视频结束时
-        // 收尾，避免出现画面冻结在最后一帧、声音继续播的坏文件
-        "-shortest",
-        "-progress",
-        "pipe:1",
-        output_path,
-    ]);
+    // 音频：mp4 兼容源（aac/m4a）直接 copy 零重编码；否则兜底重编码为 aac
+    let audio_mp4_compatible =
+        is_mp4_compatible_audio(audio_codec) || audio_path.to_lowercase().ends_with(".m4a");
+    let audio_args: &[&str] = if audio_mp4_compatible {
+        &["-c:a", "copy"]
+    } else {
+        &["-c:a", "aac", "-strict", "experimental"]
+    };
+    let mut args: Vec<&str> = vec!["-y", "-i", video_path, "-i", audio_path, "-c:v", "copy"];
+    args.extend_from_slice(audio_args);
+    // 若视频轨因断点续传损坏而略短于音频轨，-shortest 让输出在视频结束时
+    // 收尾，避免出现画面冻结在最后一帧、声音继续播的坏文件
+    args.extend_from_slice(&["-shortest", "-progress", "pipe:1", output_path]);
+    spawn.args(args);
     force_utf8_env(&mut spawn);
     hide_window_tokio(&mut spawn);
     let mut child = spawn
@@ -501,6 +504,24 @@ mod tests {
         // 文件大小、时长里恰好带 416 这几位数字，不该被当成断点失效白删 .part
         assert!(!is_unsatisfiable_range("downloading 4160 bytes"));
         assert!(!is_unsatisfiable_range("duration 416 seconds"));
+    }
+
+    #[test]
+    fn mp4_compatible_audio_covers_mp4a_and_bare_aac() {
+        // 多数站点标 mp4a.40.2；少数站点 acodec 恰为裸 "aac"，两种都应零重编码 copy
+        assert!(is_mp4_compatible_audio("mp4a.40.2"));
+        assert!(is_mp4_compatible_audio("MP4A.40.2"));
+        assert!(is_mp4_compatible_audio("aac"));
+        assert!(is_mp4_compatible_audio("AAC"));
+    }
+
+    #[test]
+    fn mp4_compatible_audio_excludes_opus_and_mp3() {
+        // opus/mp3 走兜底 aac 重编码：保守取舍，保证 mp4 容器兼容性，非 bug。
+        // 此处的预期同时锁定了 mp3 当前走重编码的行为，避免未来被误改成 copy。
+        assert!(!is_mp4_compatible_audio("opus"));
+        assert!(!is_mp4_compatible_audio("mp3"));
+        assert!(!is_mp4_compatible_audio(""));
     }
 }
 

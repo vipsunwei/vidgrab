@@ -137,6 +137,13 @@ pub async fn run_download_task(
             let vid_path = find_latest_in_dir(&output_dir, &safe_title, ".v.")?;
             let aud_path = find_latest_in_dir(&output_dir, &safe_title, ".a.")?;
 
+            // 取选定音频轨的编码，传给合并函数决定 copy 还是兜底 aac 重编码
+            let audio_codec = video_info
+                .formats
+                .iter()
+                .find(|f| f.format_id == format_ids[1])
+                .map(|f| f.acodec.as_str())
+                .unwrap_or("");
             if let Err(e) = merge_with_ffmpeg(
                 &vid_path,
                 &aud_path,
@@ -145,6 +152,7 @@ pub async fn run_download_task(
                 &app,
                 &task_id,
                 &tasks,
+                audio_codec,
             )
             .await
             {
