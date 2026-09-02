@@ -20,11 +20,6 @@ use tauri::{Manager, WindowEvent};
 
 use state::LastMonitor;
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 /// 返回系统默认下载目录（Downloads/VidGrab）
 #[tauri::command]
 fn get_default_download_dir() -> Result<String, String> {
@@ -108,7 +103,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             get_default_download_dir,
             get_app_version,
             downloader::check_system,
