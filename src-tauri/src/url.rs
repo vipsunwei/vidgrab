@@ -75,7 +75,7 @@ pub fn detect_platform(url: &str) -> &'static str {
         "虎牙"
     } else if u.contains("acfun.cn") {
         "AcFun"
-    } else if u.contains("twitter.com") || u.contains("x.com") {
+    } else if host_matches(&u, "twitter.com") || host_matches(&u, "x.com") {
         "Twitter / X"
     } else if u.contains("instagram.com") {
         "Instagram"
@@ -84,6 +84,24 @@ pub fn detect_platform(url: &str) -> &'static str {
     } else {
         "未知平台"
     }
+}
+
+/// 按「域名标签」精确匹配 host：把 URL 拆出 host 后用 '.' 切分标签，
+/// 仅当 host 的末尾标签序列等于 target 的完整标签序列时才命中。
+/// 这样 `x.com` 不会误匹配 `netflix.com`（后者末尾标签是 [`netflix`,`com`]）。
+fn host_matches(url_lower: &str, target: &str) -> bool {
+    let host = match url_lower.find("://") {
+        Some(idx) => &url_lower[idx + 3..],
+        None => url_lower,
+    };
+    let host = host.split(['/', '?', '#']).next().unwrap_or(host);
+    let host_labels: Vec<&str> = host.split('.').rev().collect();
+    let target_labels: Vec<&str> = target.split('.').rev().collect();
+    // host 标签数比 target 还少，不可能是其后缀（如裸 "com" 不应匹配 "x.com"）
+    if host_labels.len() < target_labels.len() {
+        return false;
+    }
+    target_labels.iter().zip(host_labels.iter()).all(|(a, b)| a == b)
 }
 
 #[cfg(test)]
@@ -130,5 +148,19 @@ mod tests {
             normalize_douyin_url("https://www.douyin.com/jingxuan?modal_id=123456&x=1"),
             "https://www.douyin.com/video/123456",
         );
+    }
+
+    #[test]
+    fn detect_platform_twitter() {
+        assert_eq!(detect_platform("https://twitter.com/foo/status/1"), "Twitter / X");
+        assert_eq!(detect_platform("https://x.com/foo"), "Twitter / X");
+        assert_eq!(detect_platform("https://mobile.x.com/foo"), "Twitter / X");
+    }
+
+    #[test]
+    fn detect_platform_x_com_no_false_positive() {
+        // netflix.com 末尾标签是 [netflix, com]，不应因包含子串 "x.com" 被误判为 Twitter/X
+        assert_eq!(detect_platform("https://www.netflix.com/watch/1"), "未知平台");
+        assert_eq!(detect_platform("https://xvideo.com/foo"), "未知平台");
     }
 }

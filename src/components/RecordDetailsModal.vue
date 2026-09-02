@@ -91,7 +91,7 @@ const emit = defineEmits<{
 // 否则地址栏输入新 URL 会改变历史记录里其他条目显示的平台
 const platformText = computed(() => {
   if (!props.record) return ''
-  return props.record.platform || detectPlatform(props.record.url) || '未知'
+  return props.record.platform || detectPlatform(props.record.url)
 })
 
 const timeText = computed(() =>

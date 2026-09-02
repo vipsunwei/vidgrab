@@ -24,7 +24,7 @@ export function isToday(ts: number): boolean {
   return new Date(ts).toDateString() === new Date().toDateString()
 }
 
-/// 秒 → "H:MM:SS" / "M:SS"；0 或空显示占位符
+// 秒 → "H:MM:SS" / "M:SS"；0 或空显示占位符
 export function formatDuration(seconds: number): string {
   if (!seconds) return '--:--'
   const h = Math.floor(seconds / 3600)
@@ -35,15 +35,26 @@ export function formatDuration(seconds: number): string {
     : `${m}:${s.toString().padStart(2, '0')}`
 }
 
-/// 从 "1920x1080" 取高度；非标准值（如 "audio only"）返回 0
+// 从 "1920x1080" 取高度；非标准值（如 "audio only"）返回 0
 export function parseHeight(res: string): number {
   const match = res.match(/(\d+)\s*x\s*(\d+)/)
   if (match) return parseInt(match[2], 10) || 0
   return parseInt(res, 10) || 0
 }
 
-/// 从 URL 推断平台名（与后端 url::detect_platform 保持一致）。
-/// 无法识别时返回空串，由调用方兜底。
+// 按「域名标签」精确匹配 host：仅当 URL 的末尾标签序列等于 target 的完整标签序列时命中。
+// 这样 `x.com` 不会误匹配 `netflix.com`。
+function hostMatches(urlLower: string, target: string): boolean {
+  let host = urlLower.includes('://') ? urlLower.split('://')[1] : urlLower
+  host = host.split(/[/?#]/)[0]
+  const a = host.split('.').reverse()
+  const b = target.split('.').reverse()
+  if (a.length < b.length) return false
+  return b.every((label, i) => a[i] === label)
+}
+
+// 从 URL 推断平台名（与后端 url::detect_platform 保持一致）。
+// 无法识别时返回 '未知平台'，由调用方兜底展示。
 export function detectPlatform(raw: string): string {
   const u = (raw || '').toLowerCase()
   if (u.includes('bilibili.com') || u.includes('b23.tv')) return '哔哩哔哩'
@@ -57,13 +68,14 @@ export function detectPlatform(raw: string): string {
   if (u.includes('douyu.com')) return '斗鱼'
   if (u.includes('huya.com')) return '虎牙'
   if (u.includes('acfun.cn')) return 'AcFun'
-  if (u.includes('twitter.com') || u.includes('x.com')) return 'Twitter / X'
+  // 用域名标签精确匹配，避免 netflix.com 因包含子串 "x.com" 被误判
+  if (hostMatches(u, 'twitter.com') || hostMatches(u, 'x.com')) return 'Twitter / X'
   if (u.includes('instagram.com')) return 'Instagram'
   if (u.includes('facebook.com') || u.includes('fb.watch')) return 'Facebook'
-  return ''
+  return '未知平台'
 }
 
-/// 格式体积标签：精确值优先，其次估算值（带 ~ 前缀），都没有则返回空
+// 格式体积标签：精确值优先，其次估算值（带 ~ 前缀），都没有则返回空
 export function formatSizeLabel(f: FormatInfo): string {
   if (f.filesize) return `· ${formatSize(f.filesize)}`
   if (f.filesize_approx) return `· ~${formatSize(f.filesize_approx)}`
