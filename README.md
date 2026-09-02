@@ -1,106 +1,73 @@
 # VidGrab
 
-基于 Tauri 2 + Vue 3 的视频下载器，支持 Windows / macOS / Linux。
+一款跨平台桌面视频下载器，基于 [yt-dlp](https://github.com/yt-dlp/yt-dlp) 与 ffmpeg 构建，支持 Windows / macOS / Linux。粘贴一个链接，即可把各大平台的视频下载并合成为 MP4。
 
-## 开发
+## 功能特性
 
-```bash
-pnpm install
-pnpm tauri dev
-```
+- **多平台支持**：内置识别哔哩哔哩、YouTube、抖音、小红书、微博、腾讯视频、爱奇艺、优酷、斗鱼、虎牙、AcFun、Twitter / X、Instagram、Facebook 等主流平台；底层依托 yt-dlp，可覆盖其支持的数百个站点。
+- **一键解析**：粘贴视频链接即可解析；也支持直接粘贴整段分享文案，自动从中提取真实视频地址（如抖音分享口令里的短链）。
+- **清晰度与音视频轨自选**：解析后按分辨率、格式、大小挑选视频轨与音频轨，自由组合。
+- **登录态下载**：按站点管理 Cookie，下载会员专享、登录可见等需要登录态的内容。
+- **断点续传**：下载可暂停，之后继续从中断处接着下，不必从头重来。
+- **下载队列与进度**：可同时进行多个下载任务，实时显示进度，支持暂停 / 取消。
+- **历史记录**：已下载内容集中留存，可查看详情、重新下载、打开文件所在目录。
+- **依赖自管理**：yt-dlp 随安装包内置；ffmpeg 缺失时自动补装，无需手动配置。
+- **自定义输出**：可指定保存目录与输出文件名（留空则使用视频标题）。
 
-## 构建
+## 使用说明
 
-各平台本机构建对应安装包（Tauri 不支持交叉打包）：
+### 1. 下载安装
 
-```bash
-pnpm tauri build
-```
+前往本仓库的 Releases 页面，下载对应系统的安装包：
 
-| 平台 | 产物 |
+| 系统 | 安装包 |
 | --- | --- |
-| Windows | `src-tauri/target/release/bundle/nsis/*.exe`（NSIS） |
-| macOS | `src-tauri/target/release/bundle/dmg/*.dmg` + `macos/*.app` |
-| Linux | `src-tauri/target/release/bundle/deb/*.deb` + `appimage/*.AppImage` |
+| Windows | `.exe`（NSIS 安装程序） |
+| macOS | `.dmg`（同时含 Apple Silicon 与 Intel 版本） |
+| Linux | `.deb` 与 `.AppImage` |
 
-### 发版（CI 出三平台安装包）
+安装并打开 VidGrab。
 
-安装包统一由 GitHub Actions 出（`.github/workflows/release.yml`），本地不必备齐三台机器：
+### 2. 解析视频
 
-1. 改版本号：`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` 保持一致；
-2. 打 tag 推送（tag 必须等于 `v` + 应用版本，工作流会校验）：
+在左侧「视频解析」页粘贴视频链接，点击解析。
 
-   ```bash
-   git tag v0.0.1
-   git push origin v0.0.1
-   ```
+- 可直接粘贴整段分享文案（如「复制打开抖音 https://v.douyin.com/xxx」），软件会自动提取其中的链接。
+- 解析成功后会展示视频标题、缩略图、时长等信息。
 
-3. 四个矩阵任务并行构建：Windows NSIS / macOS dmg（Apple Silicon + Intel）/ Linux deb + AppImage；
-4. Release 正文由 [git-cliff](https://git-cliff.org) 按 `cliff.toml` 从提交记录自动生成；
-5. 产物自动挂到一个**草稿 Release**，检查附件无误后手动点 Publish 发布。
+### 3. 选择清晰度与音轨（可选）
 
-### Changelog
+在解析结果中选择视频清晰度与音频轨。不同组合对应不同的画质与文件大小，按需挑选。
 
-- `CHANGELOG.md` 由 git-cliff 依据 Conventional Commits 生成，发版后手动刷新：
-  `git-cliff -o CHANGELOG.md`（Windows 侧可从 GitHub Releases 下载二进制）。
-- Release 工作流自动用 `git-cliff --latest --strip all` 生成草稿 Release 的正文，无需手动写。
+### 4. 登录站点（按需）
 
-### 内置二进制说明
+若目标内容需要登录（会员专享、私享等），前往「设置 → Cookie」：
 
-- `src-tauri/bin/yt-dlp.exe`（Windows）：**随仓库提交**，打包进安装包，目标机器无需 Python。
-  必须使用官方独立版（PyInstaller 打包，约 17MB），不要用 pip 生成的启动器存根或 python zipapp。
-- `src-tauri/bin/yt-dlp`（macOS/Linux）与 **ffmpeg（三平台）**：体积大不入库，由
-  `scripts/fetch-binaries.ts` 在 `beforeBuildCommand` 阶段自动下载（已存在则跳过，
-  `FORCE_BINARIES=1` 强制重拉）。ffmpeg 只打单体（不打 ffprobe）。
-- 构建期来源全部在 GitHub：yt-dlp 固定版本（脚本常量 `YTDLP_VERSION`，须与提交的
-  Windows 版 exe 同版本）；ffmpeg 用 ffmpeg-static 项目固定版本（常量 `FFMPEG_VERSION`，
-  按 `TAURI_TARGET` 选架构）。升级：改常量 → `FORCE_BINARIES=1 pnpm run fetch:binaries`
-  → 提交更新后的 `bin/yt-dlp.exe`。CI 对二进制做了 actions/cache，命中后构建不依赖外部下载源。
-- `install_ffmpeg` 运行时安装保留为兜底（打包资源缺失时应用内自修复），其源为
-  Windows/Linux BtbN（zip / tar.xz）、macOS evermeet.cx。yt-dlp 仅依赖构建期打包的
-  独立版，无运行时兜底安装路径。
+1. 在浏览器中用扩展（如 Get cookies.txt LOCALLY）于目标站点登录后导出 `cookies.txt`；
+2. 点击「添加 Cookie 文件」，按站点导入；同一站点再次添加即为整站更新。
 
-平台差异配置在 `src-tauri/tauri.{windows,macos,linux}.conf.json`，构建时自动与 `tauri.conf.json` 合并。
+导入后该站点即可正常解析下载。
 
-## 提交规范（强制）
+### 5. 开始下载
 
-使用 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/)，格式：
+确认保存位置与文件名，点击「开始下载并合成 MP4」。
 
-```
-<type>(<scope>?): <subject>
+- 在「下载中」可实时查看进度，支持暂停、继续、取消。
+- 暂停后的任务会在本地保留进度，稍后可断点续传。
 
-例：feat: 支持macOS和Linux
-    fix(parser): 空指针崩溃
-```
+### 6. 查看历史
 
-type 限定：`feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert`。
+在「历史记录」中查看已下载内容，支持查看详情、重新下载、打开文件或所在目录。
 
-三层强制：
+## 常见问题
 
-1. **husky commit-msg hook**：提交时本地校验（`pnpm install` 后自动生效）。
-2. **CI 校验**（`.github/workflows/ci.yml`）：push/PR 时再次校验，防止 `--no-verify` 绕过。
-3. CI 同时在 Windows / macOS / Linux 三平台跑 `cargo test` 与 `cargo clippy --all-targets
-   -- -D warnings`，保证跨平台代码可编译、可通过 lint（`-[D] warnings` 让死代码/未使用 import
-   等问题直接失败，不会在 CI 悄悄累积）。
+- **为什么提示解析失败 / 需要登录？** 部分站点（会员专享、私享内容）需要登录态，请按上文导入对应站点的 Cookie。多数失败也与网络或站点限制有关，可重试。
+- **软件需要联网吗？** 需要。VidGrab 依赖 yt-dlp 在线获取视频信息与媒体流。
+- **ffmpeg 是什么，需要我装吗？** 不需要。ffmpeg 用于把音视频流合并为 MP4，缺失时软件会自动安装。
+- **未识别的平台能下吗？** 能。平台名只用于展示，只要 yt-dlp 支持该站点，通常都可下载。
 
-## 目录结构要点
+## 相关链接
 
-```
-AGENTS.md                     # AI 编码助手项目须知（硬性约束与坑）
-CHANGELOG.md / cliff.toml     # 变更日志与 git-cliff 生成配置
-src-tauri/src/lib.rs          # Tauri 命令注册入口（invoke_handler!），仅含少量胶水命令
-src-tauri/src/downloader.rs   # yt-dlp/ffmpeg 二进制查找、命令封装、JSON 抓取
-src-tauri/src/meta.rs         # yt-dlp JSON 解析与缩略图处理
-src-tauri/src/cookies.rs       # Cookie 固定存储（Netscape 格式），按站点组管理（add/remove/clear/status/path 命令）
-src-tauri/src/url.rs          # 链接清洗与平台识别（extract_first_url / detect_platform）
-src-tauri/src/track.rs        # 单轨下载执行、断点续传重试、ffmpeg 合并
-src-tauri/src/progress.rs     # 进度行解析（yt-dlp / ffmpeg）与事件负载/回传
-src-tauri/src/proc.rs         # 进程控制原语（隐藏窗口、lossy 读取、PID 树击杀、跨平台 cfg）
-src-tauri/src/state.rs        # 运行时状态容器（任务表、暂停/取消集合、运行代号）
-src-tauri/src/download.rs     # 下载编排：start_download / pause / cancel / delete_task / clear_task_part 命令
-src-tauri/src/history.rs      # 历史与文件持久化（load/save_history、load/save_tasks、register_task_output、delete_file、redownload_cleanup）
-src-tauri/src/install.rs      # 运行时依赖安装兜底（install_ffmpeg）
-src-tauri/src/naming.rs       # 输出文件名工具
-scripts/fetch-binaries.ts    # 构建期拉取平台 yt-dlp/ffmpeg 二进制
-.husky/commit-msg             # 提交信息校验 hook
-```
+- 问题反馈：在本仓库提交 Issue。
+- 更新日志：见 `CHANGELOG.md`。
+- 开发者文档（构建 / 发版 / 贡献）：见 `CONTRIBUTING.md`。
