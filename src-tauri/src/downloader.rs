@@ -205,6 +205,8 @@ pub fn push_cookie_args(args: &mut Vec<String>, cookie: &str) {
 }
 
 /// 执行 yt-dlp --dump-json，拿到视频元数据 JSON（纯抓取，不下载）。
+/// 便捷入口：不关心 PID 槽（无外部超时控制时使用）。集成测试依赖它。
+#[allow(dead_code)]
 pub fn run_ytdlp_dump(url: &str, cookie: Option<&str>) -> Result<String, String> {
     run_ytdlp_dump_with_pid(url, cookie, &std::sync::Mutex::new(None))
 }
@@ -228,6 +230,13 @@ pub fn run_ytdlp_dump_with_pid(
     }
 
     let mut cmd = Command::new(&path);
+    // unix：设独立进程组（与下载路径一致），停止时 kill(-pid) 才能杀整组，
+    // 否则解析进程与主程序同组，树杀落空、Python 子进程变孤儿残留（#1）
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     cmd.arg("--dump-json")
         .arg("--no-download")
         .arg("--no-warnings")

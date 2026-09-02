@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, State};
 
-use crate::downloader::{find_ytdlp, run_ytdlp_dump};
+use crate::downloader::find_ytdlp;
 use crate::meta::parse_ytdlp_output;
 use crate::naming::find_latest_in_dir;
 use crate::proc::stop_task;
@@ -77,7 +77,16 @@ pub async fn run_download_task(
 
         let url = clean_url(&url);
         let cookie = cookie_source.as_deref();
-        let json_str = run_ytdlp_dump(&url, cookie)?;
+        let json_str = run_parse_stage(
+            &url,
+            cookie,
+            &tasks,
+            &task_id,
+            &pausing,
+            &cancelling,
+            seq,
+        )
+        .await?;
         let video_info = parse_ytdlp_output(&json_str, &url)?;
         // 文件名基础：用户自定义名优先（去扩展名），否则用视频标题；统一 sanitize + 截断
         let (base_title, safe_title) =
@@ -353,4 +362,72 @@ pub async fn clear_task_part(
         clean_all_fragments(&dir, &prefix);
     }
     Ok(())
+}
+
+/// 解析阶段（下载流程内）：异步跑 yt-dlp --dump-json，带 60s 超时与暂停/取消打断，
+/// PID 登记进 tasks 表供 stop_task 树杀；结束/超时/被打断后撤下登记，避免残留死 PID。
+/// 行为与前端 parse_video 对齐（spawn_blocking + timeout + kill），修 #2（同步阻塞占 tokio worker）。
+#[allow(clippy::too_many_arguments)]
+async fn run_parse_stage(
+    url: &str,
+    cookie: Option<&str>,
+    tasks: &TaskTable,
+    task_id: &str,
+    pausing: &PausingSet,
+    cancelling: &CancelSet,
+    seq: u64,
+) -> Result<String, String> {
+    // spawn 前最后一次检查：消除检查点之后、进程启动之前的竞态
+    if is_cancelled(cancelling, task_id, seq).await {
+        return Err("__cancelled__".to_string());
+    }
+    if is_paused(pausing, task_id, seq).await {
+        return Err("__paused__".to_string());
+    }
+
+    let url = url.to_string();
+    let cookie = cookie.map(|s| s.to_string());
+    let pid_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<u32>));
+    let slot_inner = pid_slot.clone();
+    let handle = tokio::task::spawn_blocking(move || {
+        crate::downloader::run_ytdlp_dump_with_pid(&url, cookie.as_deref(), &slot_inner)
+    });
+
+    // 等 PID 出现并登记进 tasks 表，使 stop_task 能树杀（unix 需底层 setpgid，已补 #1）
+    for _ in 0..50 {
+        let taken = pid_slot.lock().unwrap().take();
+        if let Some(pid) = taken {
+            tasks.lock().await.insert(task_id.to_string(), Some(pid));
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    match tokio::time::timeout(std::time::Duration::from_secs(60), handle).await {
+        Err(_) => {
+            // 超时：杀整组（unix 下 -pid 杀组）
+            if let Some(pid) = tasks.lock().await.remove(task_id).flatten() {
+                crate::proc::kill_pid_tree(pid).await;
+            }
+            Err("解析超时（60s），已终止解析进程".to_string())
+        }
+        Ok(joined) => {
+            // 无论成败都撤下 PID 登记（避免残留 PID 让 stop_task 拿死 PID 树杀）
+            tasks.lock().await.remove(task_id);
+            match joined {
+                Ok(Ok(json)) => Ok(json),
+                Ok(Err(e)) => {
+                    // 进程被 stop_task 杀掉导致的失败 → 转成暂停/取消哨兵
+                    if is_paused(pausing, task_id, seq).await {
+                        Err("__paused__".to_string())
+                    } else if is_cancelled(cancelling, task_id, seq).await {
+                        Err("__cancelled__".to_string())
+                    } else {
+                        Err(e)
+                    }
+                }
+                Err(e) => Err(format!("yt-dlp 调用失败: {}", e)),
+            }
+        }
+    }
 }
