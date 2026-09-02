@@ -454,9 +454,28 @@ pub async fn merge_with_ffmpeg(
         buf
     });
 
-    let (status, _, stderr_log) = tokio::join!(child.wait(), progress_handle, err_handle);
-
-    let status = status.map_err(|e| format!("ffmpeg 进程出错: {}", e))?;
+    // 合并超时兜底：ffmpeg 偶发挂死（损坏输入/编码器死锁）会让 child.wait()
+    // 永久挂起，拖垮整个下载任务且 PID 常驻 tasks。按视频时长给宽容上限并封顶。
+    let merge_secs = ((duration_secs as u64) * 5 + 120).min(1800);
+    let merge_timeout = std::time::Duration::from_secs(merge_secs);
+    let status = match tokio::time::timeout(merge_timeout, child.wait()).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            let _ = progress_handle.abort();
+            let _ = err_handle.abort();
+            return Err(format!("ffmpeg 进程出错: {}", e));
+        }
+        Err(_) => {
+            // 杀掉 ffmpeg 进程组（含其可能 fork 的子进程），避免孤儿残留
+            if let Some(p) = pid {
+                kill_pid_tree(p).await;
+            }
+            let _ = progress_handle.abort();
+            let _ = err_handle.abort();
+            return Err(format!("ffmpeg 合并超时（>{}s），已终止进程", merge_secs));
+        }
+    };
+    let (_, stderr_log) = tokio::join!(progress_handle, err_handle);
     let stderr_log = stderr_log.unwrap_or_default();
     if !status.success() {
         return Err(format!("ffmpeg 合并失败: {}", stderr_log));
