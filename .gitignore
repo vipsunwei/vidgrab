@@ -44,3 +44,6 @@ src-tauri/bin/binaries.lock.json
 _fix_*.py
 _fix_*.ps1
 *.bak
+
+# CodeBuddy IDE 工作区数据（非临时缓存，随项目生成，不入库）
+.codebuddy/

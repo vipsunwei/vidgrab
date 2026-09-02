@@ -91,6 +91,7 @@ CHANGELOG.md / cliff.toml     # 变更日志与 git-cliff 生成配置
 src-tauri/src/lib.rs          # Tauri 命令注册入口（invoke_handler!），仅含少量胶水命令
 src-tauri/src/downloader.rs   # yt-dlp/ffmpeg 二进制查找、命令封装、JSON 抓取
 src-tauri/src/meta.rs         # yt-dlp JSON 解析与缩略图处理
+src-tauri/src/cookies.rs       # Cookie 固定存储（Netscape 格式），按站点组管理（add/remove/clear/status/path 命令）
 src-tauri/src/url.rs          # 链接清洗与平台识别（extract_first_url / detect_platform）
 src-tauri/src/track.rs        # 单轨下载执行、断点续传重试、ffmpeg 合并
 src-tauri/src/progress.rs     # 进度行解析（yt-dlp / ffmpeg）与事件负载/回传
