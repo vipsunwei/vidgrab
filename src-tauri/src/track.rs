@@ -73,9 +73,11 @@ fn has_winsock_code(m: &str) -> bool {
 
 /// 判定是否「断点失效」类错误（HTTP 416：.part 大小与服务端错位）。
 /// 此时续传必然再次 416，必须删除 .part 从头下载。
+/// 注意：不能裸匹配 "416"——文件大小/时长里出现同串数字会误判为断点失效，
+/// 白删 .part 从头下载。对齐 is_network_error 里 has_winsock_code 的教训：用精确上下文。
 pub fn is_unsatisfiable_range(msg: &str) -> bool {
     let m = msg.to_lowercase();
-    m.contains("416") || m.contains("requested range not satisfiable")
+    m.contains("http error 416") || m.contains("requested range not satisfiable")
 }
 
 /// 删除某输出模板对应的 .part 断点文件（含分片 .part-FragN）。
@@ -492,6 +494,13 @@ mod tests {
     fn unsatisfiable_range_detected() {
         assert!(is_unsatisfiable_range("HTTP Error 416: Requested Range Not Satisfiable"));
         assert!(!is_unsatisfiable_range("HTTP Error 404"));
+    }
+
+    #[test]
+    fn unsatisfiable_range_ignores_bare_numbers() {
+        // 文件大小、时长里恰好带 416 这几位数字，不该被当成断点失效白删 .part
+        assert!(!is_unsatisfiable_range("downloading 4160 bytes"));
+        assert!(!is_unsatisfiable_range("duration 416 seconds"));
     }
 }
 
