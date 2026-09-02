@@ -239,7 +239,7 @@ pub fn run_ytdlp_dump_with_pid(
     cmd.env("PYTHONIOENCODING", "utf-8");
     cmd.env("PYTHONUTF8", "1");
     if let Some(src) = cookie {
-        if !src.is_empty() && src != "none" {
+        if !src.is_empty() {
             let mut cookie_args: Vec<String> = Vec::new();
             push_cookie_args(&mut cookie_args, src);
             for a in cookie_args {
@@ -361,5 +361,49 @@ mod tests {
         let path = find_ytdlp();
         assert!(path.is_some(), "应能找到 yt-dlp");
         println!("yt-dlp 路径: {:?}", path.unwrap());
+    }
+
+    #[test]
+    fn is_cookie_file_requires_txt_and_existing() {
+        let dir = std::env::temp_dir().join(format!("vidgrab_cookie_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let txt = dir.join("cookies.txt");
+        std::fs::write(&txt, "# Netscape cookie\n").unwrap();
+        let not_txt = dir.join("cookies");
+        std::fs::write(&not_txt, "x").unwrap();
+
+        // .txt 且真实存在 → true
+        assert!(is_cookie_file(txt.to_str().unwrap()));
+        // 非 .txt 后缀 → false
+        assert!(!is_cookie_file(not_txt.to_str().unwrap()));
+        // 不存在的路径 → false
+        assert!(!is_cookie_file("C:\\no\\such\\file.txt"));
+        // 浏览器名 / 空串 / "none" → false（不是文件路径）
+        assert!(!is_cookie_file(""));
+        assert!(!is_cookie_file("none"));
+        assert!(!is_cookie_file("chrome"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn push_cookie_args_only_for_file() {
+        let dir = std::env::temp_dir().join(format!("vidgrab_pushcookie_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let txt = dir.join("c.txt");
+        std::fs::write(&txt, "x").unwrap();
+
+        let mut args = vec!["--no-warnings".into()];
+        push_cookie_args(&mut args, txt.to_str().unwrap());
+        assert_eq!(args, vec!["--no-warnings".to_string(), "--cookies".to_string(), txt.to_str().unwrap().to_string()]);
+
+        // 非文件路径 → 不追加任何参数
+        let mut args2 = vec!["--no-warnings".into()];
+        push_cookie_args(&mut args2, "none");
+        push_cookie_args(&mut args2, "");
+        push_cookie_args(&mut args2, "firefox");
+        assert_eq!(args2, vec!["--no-warnings".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
