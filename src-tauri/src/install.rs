@@ -19,94 +19,85 @@ pub struct FFmpegInstallProgress {
     stage: String, // "downloading" | "extracting" | "done"
 }
 
-/// 各平台的 ffmpeg 下载源列表 (url, 保存文件名)。
-/// - Windows: BtbN win64 zip（bin/ 目录内含 ffmpeg、ffprobe）
-/// - macOS: BtbN 不提供 macOS 构建，用 evermeet.cx 的独立二进制 zip（ffmpeg、ffprobe 各一个）
-/// - Linux: BtbN linux64 tar.xz
+/// 各平台的 ffmpeg 下载源 (url, 压缩包文件名)。
+/// 与构建期 scripts/fetch-binaries.ts 同款 eugeneware/ffmpeg-static 固定版本单文件 .gz，
+/// 以便运行时校验的 SHA256 与打包二进制一致（构建期已算好注入）。
 pub fn ffmpeg_sources() -> Vec<(String, String)> {
+    let ver = match option_env!("VIDGRAB_FFMPEG_VERSION") {
+        Some(v) if !v.is_empty() => v.to_string(),
+        _ => return vec![], // 构建信息缺失则不下（避免无校验下载）
+    };
+    let base = format!("https://github.com/eugeneware/ffmpeg-static/releases/download/{ver}");
     if cfg!(target_os = "windows") {
-        vec![(
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip".to_string(),
-            "ffmpeg-win64.zip".to_string(),
-        )]
+        vec![(format!("{base}/ffmpeg-win32-x64.gz"), "ffmpeg-win32-x64.gz".to_string())]
     } else if cfg!(target_os = "macos") {
-        vec![
-            (
-                "https://evermeet.cx/ffmpeg/getrelease/zip".to_string(),
-                "ffmpeg-macos.zip".to_string(),
-            ),
-            (
-                "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip".to_string(),
-                "ffprobe-macos.zip".to_string(),
-            ),
-        ]
+        let asset = if cfg!(target_arch = "aarch64") {
+            "ffmpeg-darwin-arm64"
+        } else {
+            "ffmpeg-darwin-x64"
+        };
+        vec![(format!("{base}/{asset}.gz"), format!("{asset}.gz"))]
     } else {
-        vec![(
-            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
-            "ffmpeg-linux64.tar.xz".to_string(),
-        )]
+        let asset = if cfg!(target_arch = "aarch64") {
+            "ffmpeg-linux-arm64"
+        } else {
+            "ffmpeg-linux-x64"
+        };
+        vec![(format!("{base}/{asset}.gz"), format!("{asset}.gz"))]
     }
 }
 
 
-/// 解压 zip 到 dest（全平台）
-pub fn extract_zip_archive(zip_path: &Path, dest: &Path) -> Result<(), String> {
-    let zip_data =
-        std::fs::read(zip_path).map_err(|e| format!("读取压缩包失败: {}", e))?;
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&zip_data))
-        .map_err(|e| format!("解压失败: {}", e))?;
-    for i in 0..archive.len() {
-        let mut file = archive
-            .by_index(i)
-            .map_err(|e| format!("读取压缩包内文件失败: {}", e))?;
-        let outpath = dest.join(file.mangled_name());
-        if file.is_dir() {
-            std::fs::create_dir_all(&outpath).ok();
-        } else {
-            if let Some(parent) = outpath.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            let mut outfile = std::fs::File::create(&outpath)
-                .map_err(|e| format!("创建解压文件失败: {}", e))?;
-            std::io::copy(&mut file, &mut outfile)
-                .map_err(|e| format!("写入解压文件失败: {}", e))?;
-        }
-    }
+/// 解压 .gz 单文件到 dest（eugeneware/ffmpeg-static 的资产是 gzip 压缩的单文件）
+pub fn extract_gz_archive(gz_path: &Path, dest: &Path) -> Result<(), String> {
+    let f = std::fs::File::open(gz_path).map_err(|e| format!("读取压缩包失败: {}", e))?;
+    let mut decoder = flate2::read::GzDecoder::new(f);
+    let mut out = std::fs::File::create(dest).map_err(|e| format!("创建解压文件失败: {}", e))?;
+    std::io::copy(&mut decoder, &mut out).map_err(|e| format!("解压失败: {}", e))?;
     Ok(())
 }
 
-
-/// 解压 tar.xz 到 dest（Linux 的 BtbN 包是 tar.xz 格式）
-#[cfg(target_os = "linux")]
-pub fn extract_tar_xz_archive(path: &Path, dest: &Path) -> Result<(), String> {
-    let f = std::fs::File::open(path).map_err(|e| format!("读取压缩包失败: {}", e))?;
-    let decoder = xz2::read::XzDecoder::new(f);
-    let mut archive = tar::Archive::new(decoder);
-    archive.unpack(dest).map_err(|e| format!("解压失败: {}", e))
+/// 计算文件 SHA256（小写十六进制），供安装器校验二进制完整性
+fn sha256_of(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).map_err(|e| format!("计算哈希失败: {}", e))?;
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
-#[cfg(not(target_os = "linux"))]
-pub fn extract_tar_xz_archive(_path: &Path, _dest: &Path) -> Result<(), String> {
-    Err("当前平台不使用 tar.xz 包".to_string())
-}
-
-
-/// 在目录中递归查找文件名精确匹配的文件（压缩包层级浅，无需剪枝）
-pub fn find_file_recursive(dir: &Path, name: &str) -> Option<PathBuf> {
-    for entry in std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()) {
-        let p = entry.path();
-        if p.is_file() {
-            if p.file_name().map(|n| n == name).unwrap_or(false) {
-                return Some(p);
-            }
-        } else if p.is_dir() {
-            if let Some(found) = find_file_recursive(&p, name) {
-                return Some(found);
-            }
+/// 当前平台期望的 ffmpeg SHA256（构建期由 fetch-binaries 算好注入；缺则 None 跳过校验）
+fn expected_ffmpeg_sha() -> Option<&'static str> {
+    if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            option_env!("VIDGRAB_FFMPEG_DARWIN_ARM64_SHA")
+        } else {
+            option_env!("VIDGRAB_FFMPEG_DARWIN_X64_SHA")
         }
+    } else if cfg!(target_os = "linux") {
+        if cfg!(target_arch = "aarch64") {
+            option_env!("VIDGRAB_FFMPEG_LINUX_ARM64_SHA")
+        } else {
+            option_env!("VIDGRAB_FFMPEG_LINUX_X64_SHA")
+        }
+    } else if cfg!(target_os = "windows") {
+        option_env!("VIDGRAB_FFMPEG_WIN32_X64_SHA")
+    } else {
+        None
     }
-    None
 }
+
+/// 当前平台期望的 yt-dlp SHA256
+fn expected_ytdlp_sha() -> Option<&'static str> {
+    if cfg!(target_os = "windows") {
+        option_env!("VIDGRAB_YTDLP_WIN_SHA")
+    } else if cfg!(target_os = "macos") {
+        option_env!("VIDGRAB_YTDLP_MAC_SHA")
+    } else {
+        option_env!("VIDGRAB_YTDLP_LINUX_SHA")
+    }
+}
+
 
 
 /// 从 HTTP Content-Length 获取总大小（字节），失败返回 None
@@ -124,12 +115,13 @@ pub async fn install_ffmpeg(app: tauri::AppHandle) -> Result<String, String> {
     }
 
     let sources = ffmpeg_sources();
+    if sources.is_empty() {
+        return Err("构建信息缺失（未注入 ffmpeg 版本/哈希），无法安全下载安装".to_string());
+    }
+    let (url, file_name) = &sources[0];
     let dst_dir = bin_install_dir(&app)?;
 
     let tmp_dir = std::env::temp_dir().join("vidgrab-ffmpeg-install");
-    let extract_dir = tmp_dir.join("extract");
-
-    // 确保临时目录干净
     let _ = std::fs::remove_dir_all(&tmp_dir);
     std::fs::create_dir_all(&tmp_dir)
         .map_err(|e| format!("创建临时目录失败: {}", e))?;
@@ -139,45 +131,34 @@ pub async fn install_ffmpeg(app: tauri::AppHandle) -> Result<String, String> {
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-    // 逐个下载源文件，进度按 (已完成文件数 + 当前文件比例) / 总数 折算
-    for (idx, (url, file_name)) in sources.iter().enumerate() {
-        let total_bytes = fetch_content_length(url).await
-            .unwrap_or(200_000_000_u64); // fallback 200MB
-
-        let response = client.get(url)
-            .send()
-            .await
-            .map_err(|e| format!("下载 FFmpeg 失败: {}", e))?;
-
-        let archive_path = tmp_dir.join(file_name);
-        let mut file = std::fs::File::create(&archive_path)
-            .map_err(|e| format!("创建下载文件失败: {}", e))?;
-        let mut stream = response.bytes_stream();
-        let mut downloaded: u64 = 0;
-
-        while let Some(chunk) = futures_util::stream::StreamExt::next(&mut stream).await
-        {
-            let chunk = chunk.map_err(|e| format!("下载流失败: {}", e))?;
-            downloaded += chunk.len() as u64;
-            let file_frac = if total_bytes > 0 {
-                downloaded as f64 / total_bytes as f64
-            } else {
-                0.0
-            };
-            let overall = ((idx as f64 + file_frac) / sources.len() as f64 * 100.0).min(100.0);
-            let _ = app.emit("ffmpeg-install-progress", FFmpegInstallProgress {
-                progress: overall,
-                speed: format!("{:.0} MB", downloaded as f64 / 1_048_576.0),
-                downloaded_mb: downloaded as f64 / 1_048_576.0,
-                total_mb: total_bytes as f64 / 1_048_576.0,
-                stage: "downloading".to_string(),
-            });
-            std::io::Write::write_all(&mut file, &chunk)
-                .map_err(|e| format!("写入文件失败: {}", e))?;
-        }
-        std::io::Write::flush(&mut file)
-            .map_err(|e| format!("刷新文件失败: {}", e))?;
+    // 下载 .gz 单文件
+    let total_bytes = fetch_content_length(url).await.unwrap_or(80_000_000_u64);
+    let response = client.get(url).send().await
+        .map_err(|e| format!("下载 FFmpeg 失败: {}", e))?;
+    let gz_path = tmp_dir.join(file_name);
+    let mut file = std::fs::File::create(&gz_path)
+        .map_err(|e| format!("创建下载文件失败: {}", e))?;
+    let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
+    while let Some(chunk) = futures_util::stream::StreamExt::next(&mut stream).await {
+        let chunk = chunk.map_err(|e| format!("下载流失败: {}", e))?;
+        downloaded += chunk.len() as u64;
+        let overall = if total_bytes > 0 {
+            (downloaded as f64 / total_bytes as f64 * 100.0).min(100.0)
+        } else {
+            0.0
+        };
+        let _ = app.emit("ffmpeg-install-progress", FFmpegInstallProgress {
+            progress: overall,
+            speed: format!("{:.0} MB", downloaded as f64 / 1_048_576.0),
+            downloaded_mb: downloaded as f64 / 1_048_576.0,
+            total_mb: total_bytes as f64 / 1_048_576.0,
+            stage: "downloading".to_string(),
+        });
+        std::io::Write::write_all(&mut file, &chunk)
+            .map_err(|e| format!("写入文件失败: {}", e))?;
     }
+    std::io::Write::flush(&mut file).map_err(|e| format!("刷新文件失败: {}", e))?;
 
     let _ = app.emit("ffmpeg-install-progress", FFmpegInstallProgress {
         progress: 100.0,
@@ -187,34 +168,23 @@ pub async fn install_ffmpeg(app: tauri::AppHandle) -> Result<String, String> {
         stage: "extracting".to_string(),
     });
 
-    // 全部解压到同一目录
-    std::fs::create_dir_all(&extract_dir)
-        .map_err(|e| format!("创建解压目录失败: {}", e))?;
-    for (_url, file_name) in &sources {
-        let archive_path = tmp_dir.join(file_name);
-        if file_name.ends_with(".zip") {
-            extract_zip_archive(&archive_path, &extract_dir)?;
-        } else {
-            extract_tar_xz_archive(&archive_path, &extract_dir)?;
+    // 解压 .gz 单文件得到 ffmpeg，复制到安装目录前先做 SHA256 校验
+    let ffmpeg_name = ffmpeg_binary_name();
+    let ffmpeg_tmp = tmp_dir.join(ffmpeg_name);
+    extract_gz_archive(&gz_path, &ffmpeg_tmp)?;
+    if let Some(exp) = expected_ffmpeg_sha() {
+        let actual = sha256_of(&ffmpeg_tmp)?;
+        if actual.to_lowercase() != exp.to_lowercase() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(format!(
+                "ffmpeg 校验失败：哈希不匹配（期望 {exp}，实际 {actual}），可能下载被篡改"
+            ));
         }
     }
-
-    // 在解压目录中定位 ffmpeg / ffprobe，复制到安装目录
-    // （ffprobe 目前代码未直接使用，找不到不阻塞安装）
-    let ffmpeg_name = ffmpeg_binary_name();
-    let ffprobe_name = if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" };
-    let ffmpeg_src = find_file_recursive(&extract_dir, ffmpeg_name)
-        .ok_or("解压后未找到 ffmpeg")?;
     let ffmpeg_dst = dst_dir.join(ffmpeg_name);
-    std::fs::copy(&ffmpeg_src, &ffmpeg_dst)
+    std::fs::copy(&ffmpeg_tmp, &ffmpeg_dst)
         .map_err(|e| format!("复制 ffmpeg 失败: {}", e))?;
     chmod_exec(&ffmpeg_dst)?;
-    if let Some(ffprobe_src) = find_file_recursive(&extract_dir, ffprobe_name) {
-        let ffprobe_dst = dst_dir.join(ffprobe_name);
-        std::fs::copy(&ffprobe_src, &ffprobe_dst)
-            .map_err(|e| format!("复制 ffprobe 失败: {}", e))?;
-        chmod_exec(&ffprobe_dst)?;
-    }
 
     // 清理临时目录
     let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -265,24 +235,23 @@ pub fn chmod_exec(_path: &Path) -> Result<(), String> {
 }
 
 /// 按平台返回 yt-dlp 的下载地址与目标文件名，即 (download_url, target_filename_with_ext)。
+/// 使用构建期锁定的固定版本（与打包二进制一致），并由构建期算好的 SHA256 运行时校验；
+/// 构建信息缺失时降级为 latest（不校验，仅异常构建才会走到）。
 pub fn get_ytdlp_url_for_platform() -> Option<(String, String)> {
+    let ver = option_env!("VIDGRAB_YTDLP_VERSION").unwrap_or("latest");
+    let base = if ver == "latest" {
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download".to_string()
+    } else {
+        format!("https://github.com/yt-dlp/yt-dlp/releases/download/{ver}")
+    };
     if cfg!(target_os = "windows") {
-        Some((
-            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe".to_string(),
-            "yt-dlp.exe".to_string(),
-        ))
+        Some((format!("{base}/yt-dlp.exe"), "yt-dlp.exe".to_string()))
     } else if cfg!(target_os = "macos") {
-        Some((
-            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos".to_string(),
-            "yt-dlp".to_string(),
-        ))
+        Some((format!("{base}/yt-dlp_macos"), "yt-dlp".to_string()))
     } else {
         // 注意用独立版 yt-dlp_linux（PyInstaller 打包，无需 Python）；
         // release 里的 `yt-dlp` 资产是 python zipapp，裸机器跑不起来
-        Some((
-            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux".to_string(),
-            "yt-dlp".to_string(),
-        ))
+        Some((format!("{base}/yt-dlp_linux"), "yt-dlp".to_string()))
     }
 }
 
@@ -345,6 +314,17 @@ pub async fn install_ytdlp(app: tauri::AppHandle) -> Result<String, String> {
             .map_err(|e| format!("写入文件失败: {}", e))?;
     }
     std::io::Write::flush(&mut file).map_err(|e| format!("刷新文件失败: {}", e))?;
+
+    // SHA256 校验，防传输层篡改/损坏（校验值缺失时跳过，降级为不校验）
+    if let Some(exp) = expected_ytdlp_sha() {
+        let actual = sha256_of(&tmp_path)?;
+        if actual.to_lowercase() != exp.to_lowercase() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(format!(
+                "yt-dlp 校验失败：哈希不匹配（期望 {exp}，实际 {actual}），可能下载被篡改"
+            ));
+        }
+    }
 
     // 移动到 exe 同目录
     std::fs::copy(&tmp_path, &dst).map_err(|e| format!("复制文件失败: {}", e))?;

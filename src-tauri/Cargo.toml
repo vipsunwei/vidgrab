@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+serde_json = "1"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -27,13 +28,9 @@ tokio = { version = "1", features = ["process", "io-util", "rt", "macros"] }
 reqwest = { version = "0.12", features = ["stream"] }
 futures-util = "0.3"
 base64 = "0.22"
-zip = "2"
 dirs = "5"
-
-# Linux 运行时安装 ffmpeg 需要：BtbN 的 Linux 包是 tar.xz 格式
-[target.'cfg(target_os = "linux")'.dependencies]
-tar = "0.4"
-xz2 = "0.1"
+sha2 = "0.10"
+flate2 = "1"
 
 # unix 进程组击杀（PyInstaller 父子进程树）
 [target.'cfg(unix)'.dependencies]

@@ -6,10 +6,11 @@
 //
 // 两个二进制都只取 ffmpeg 单体、不打 ffprobe（全项目只用 ffmpeg 做分轨合并）。
 // 来源均在 GitHub：CI 同机房直连 + 本脚本重试/超时 + 工作流 actions/cache 三重保障。
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { chmod, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 import zlib from 'node:zlib'
 
 const REPO_ROOT: string = path.resolve(
@@ -34,6 +35,36 @@ async function updateLock(key: string, version: string): Promise<void> {
   const lock = await readLock()
   lock[key] = version
   await writeFile(LOCK_PATH, JSON.stringify(lock, null, 2) + '\n')
+}
+
+/** SHA256 清单：记录 bin/ 下各二进制对应固定版本的哈希，供 Rust 侧运行时校验
+ *  （构建期算好固化，安装器下载同版本后比对，防传输层篡改/损坏）。 */
+const SHA_PATH = path.join(BIN_DIR, 'binaries.sha256.json')
+
+interface ShaEntry {
+  version: string
+  [k: string]: string
+}
+interface ShaMap {
+  'yt-dlp': ShaEntry
+  ffmpeg: ShaEntry
+}
+
+async function readSha(): Promise<ShaMap> {
+  try {
+    const v = JSON.parse(await readFile(SHA_PATH, 'utf8'))
+    return { 'yt-dlp': v['yt-dlp'] ?? { version: '' }, ffmpeg: v.ffmpeg ?? { version: '' } }
+  } catch {
+    return { 'yt-dlp': { version: '' }, ffmpeg: { version: '' } }
+  }
+}
+
+async function writeSha(map: ShaMap): Promise<void> {
+  await writeFile(SHA_PATH, JSON.stringify(map, null, 2) + '\n')
+}
+
+function sha256File(p: string): string {
+  return createHash('sha256').update(Buffer.from(readFileSync(p))).digest('hex')
 }
 
 /** yt-dlp 固定版本（不用 latest：可复现构建，上游资产变更不会突然挂掉）。
@@ -139,6 +170,11 @@ async function fetchYtDlp(target: YtDlpTarget): Promise<void> {
   if (existsSync(dest) && !process.env.FORCE_BINARIES) {
     if (lock['yt-dlp'] === YTDLP_VERSION) {
       console.log(`[fetch-binaries] ${target.file} 已存在且版本匹配（${YTDLP_VERSION}），跳过下载`)
+      // 跳过下载也要记录 SHA256，供运行时安装器校验完整性
+      const pk = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
+      const shaMap = await readSha()
+      shaMap['yt-dlp'] = { ...shaMap['yt-dlp'], version: YTDLP_VERSION, [pk]: sha256File(dest) }
+      await writeSha(shaMap)
       return
     }
     console.log(`[fetch-binaries] ${target.file} 版本不是 ${YTDLP_VERSION}，重新下载`)
@@ -149,6 +185,10 @@ async function fetchYtDlp(target: YtDlpTarget): Promise<void> {
     await chmod(dest, 0o755)
   }
   await updateLock('yt-dlp', YTDLP_VERSION)
+  const pk = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
+  const shaMap = await readSha()
+  shaMap['yt-dlp'] = { ...shaMap['yt-dlp'], version: YTDLP_VERSION, [pk]: sha256File(dest) }
+  await writeSha(shaMap)
   console.log(`[fetch-binaries] 完成: ${dest} (${(size / 1048576).toFixed(1)} MB)`)
 }
 
@@ -160,6 +200,11 @@ async function fetchFfmpeg(): Promise<void> {
   if (existsSync(dest) && !process.env.FORCE_BINARIES) {
     if (lock['ffmpeg'] === FFMPEG_VERSION) {
       console.log(`[fetch-binaries] ${path.basename(dest)} 已存在且版本匹配（${FFMPEG_VERSION}），跳过下载`)
+      // 跳过下载也要记录 SHA256，供运行时安装器校验完整性
+      const assetKey = ffmpegAsset().replace(/^ffmpeg-/, '')
+      const shaMap = await readSha()
+      shaMap.ffmpeg = { ...shaMap.ffmpeg, version: FFMPEG_VERSION, [assetKey]: sha256File(dest) }
+      await writeSha(shaMap)
       return
     }
     console.log(`[fetch-binaries] ${path.basename(dest)} 版本不是 ${FFMPEG_VERSION}，重新下载`)
@@ -180,6 +225,10 @@ async function fetchFfmpeg(): Promise<void> {
     await chmod(dest, 0o755)
   }
   await updateLock('ffmpeg', FFMPEG_VERSION)
+  const assetKey = ffmpegAsset().replace(/^ffmpeg-/, '')
+  const shaMap = await readSha()
+  shaMap.ffmpeg = { ...shaMap.ffmpeg, version: FFMPEG_VERSION, [assetKey]: sha256File(dest) }
+  await writeSha(shaMap)
   console.log(`[fetch-binaries] 完成: ${dest} (${(out.length / 1048576).toFixed(1)} MB)`)
 }
 

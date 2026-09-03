@@ -39,6 +39,7 @@ src-tauri/bin/yt-dlp.zip
 src-tauri/bin/yt-dlp.pyz
 # fetch 脚本生成的版本清单（本地派生态，不入库）
 src-tauri/bin/binaries.lock.json
+src-tauri/bin/binaries.sha256.json
 
 # Python scripts used only for local theming fixes
 _fix_*.py
