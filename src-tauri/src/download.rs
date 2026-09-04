@@ -292,6 +292,7 @@ pub async fn pause_download(
 /// 清理某任务输出目录中的临时碎片：以 {prefix}. 开头，且属于以下任一：
 /// - 双轨中间文件（{prefix}.v.* / {prefix}.a.*）
 /// - 单轨/双轨的 .part 断点（含 yt-dlp 分片 .part-FragN）
+///
 /// 不碰成品（{prefix}.mp4 等），也不会误删其他任务（前缀含任务专属的 quality tag）。
 /// 取消/失败与显式删除（delete_task / clear_task_part）统一调用，避免单轨 .part 漏清。
 /// 暂停时不调本函数——那是断点续传的原料，要留着。

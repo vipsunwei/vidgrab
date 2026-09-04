@@ -361,6 +361,8 @@ pub fn is_mp4_compatible_audio(codec: &str) -> bool {
     c.contains("mp4a") || c == "aac"
 }
 
+// 参数含合并所需路径/时长/音频编码，外加进度与进程登记的上下文，无法再拆分，故豁免
+#[allow(clippy::too_many_arguments)]
 pub async fn merge_with_ffmpeg(
     video_path: &str,
     audio_path: &str,
@@ -461,8 +463,8 @@ pub async fn merge_with_ffmpeg(
     let status = match tokio::time::timeout(merge_timeout, child.wait()).await {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => {
-            let _ = progress_handle.abort();
-            let _ = err_handle.abort();
+            progress_handle.abort();
+            err_handle.abort();
             return Err(format!("ffmpeg 进程出错: {}", e));
         }
         Err(_) => {
@@ -470,8 +472,8 @@ pub async fn merge_with_ffmpeg(
             if let Some(p) = pid {
                 kill_pid_tree(p).await;
             }
-            let _ = progress_handle.abort();
-            let _ = err_handle.abort();
+            progress_handle.abort();
+            err_handle.abort();
             return Err(format!("ffmpeg 合并超时（>{}s），已终止进程", merge_secs));
         }
     };
