@@ -85,13 +85,12 @@ export function useParser(getCookieFile: () => string) {
   // 无兼容源时回退最高码率（后端会兜底重编码为 aac）。
   const audioTracks = computed<FormatInfo[]>(() => {
     if (!metadata.value?.formats) return []
-    // 与后端 audio_mp4_compatible 对齐：这些编码可被 mp4 直接 copy（含裸 aac），
-    // 另补 m4a 容器扩展名特判。用于把可直接 copy 的音频轨排到优先位。
-    const MP4_AUDIO_CODECS = ['aac', 'mp4a', 'opus', 'mp3', 'ac3', 'eac3', 'flac', 'alac']
+    // 与后端 is_mp4_compatible_audio 严格等价：仅 aac/mp4a（含 m4a 容器）能被 mp4 直接 copy。
+    // 其余编码（opus/mp3/flac 等）后端会兜底重编码为 aac，故不排在"零重编码"优先位。
     const isMp4Audio = (f: FormatInfo) => {
       if ((f.ext || '') === 'm4a') return true
       const ac = (f.acodec || '').toLowerCase()
-      return MP4_AUDIO_CODECS.some((c) => ac.includes(c))
+      return ac.includes('mp4a') || ac === 'aac'
     }
     return metadata.value.formats
       .filter((f) => {
