@@ -120,16 +120,30 @@ if (dry) {
   // 真实执行：git-cliff 只读、输出到 stdout，让用户预览本版正文
   execSync(`git-cliff --unreleased --strip all --tag v${ver}`, { cwd: root, stdio: 'inherit' })
 } else {
-  run(`git-cliff -o CHANGELOG.md --unreleased --tag v${ver}`)
-  // --unreleased 模式下 git-cliff 的 previous 会误取当前版本（v0.0.2...v0.0.2），
-  // 用本地最新 tag 修正 compare 链接（CI 的 --latest 模式无此问题）
+  // 只生成新版本段（--strip all 去掉全局 header/footer），插入到 CHANGELOG.md
+  // 头部说明之后——不能 -o 整文件覆盖，否则会冲掉历史版本段
+  const seg = execSync(`git-cliff --unreleased --strip all --tag v${ver}`, {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  // --unreleased 模式下 git-cliff 的 previous 会误取当前版本，用本地最新 tag 修正 compare 链接
   let prevTag = ''
   try {
     prevTag = git('describe --tags --abbrev=0')
   } catch { /* 首个版本没有上一个 tag */ }
-  if (prevTag && prevTag !== `v${ver}`) {
-    const clPath = path.join(root, 'CHANGELOG.md')
-    writeFileSync(clPath, readFileSync(clPath, 'utf8').replace(`compare/v${ver}...v${ver}`, `compare/${prevTag}...v${ver}`))
+  const fixed = prevTag && prevTag !== `v${ver}`
+    ? seg.replace(`compare/v${ver}...v${ver}`, `compare/${prevTag}...v${ver}`)
+    : seg
+  const clPath = path.join(root, 'CHANGELOG.md')
+  const cl = readFileSync(clPath, 'utf8')
+  const headEnd = cl.indexOf('\n## [')
+  if (headEnd === -1) {
+    // 尚无任何版本段：写到头部说明之后
+    writeFileSync(clPath, cl.replace(/\s*$/, '\n\n') + fixed.replace(/\s*$/, '\n'))
+  } else {
+    const header = cl.slice(0, headEnd + 1)
+    const rest = cl.slice(headEnd + 1)
+    writeFileSync(clPath, header + fixed.replace(/\s*$/, '\n') + '\n' + rest)
   }
 }
 
@@ -138,7 +152,7 @@ run('cargo update -p vidgrab --offline', path.join(root, 'src-tauri'))
 
 // 6. 提交推送 + 打 tag 推送（tag 指向含 changelog 的提交）
 run(`git add ${CONF} ${TOML} src-tauri/Cargo.lock package.json CHANGELOG.md`)
-run(`git commit -m "chore: release v${ver}"`)
+run(`git commit -m "chore(release): v${ver}"`)
 
 // 推送前探测本地代理：有则走代理，无则直连
 const proxy = await detectProxy()

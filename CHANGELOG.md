@@ -46,4 +46,14 @@
 - 忽略 .codebuddy/ 工作区数据
 - 加一键发版脚本并完善文档链接
 - 发版脚本推送前自动探测本地代理
+
+[0.0.2]: https://github.com/vipsunwei/vidgrab/compare/v0.0.1...v0.0.2
+
+## [0.0.1] - 2026-08-30
+
+### ✨ 新功能
+- VidGrab 0.0.1 初始版本
+
+[0.0.1]: https://github.com/vipsunwei/vidgrab/tree/v0.0.1
+
 <!-- 由 git-cliff 自动生成，请勿手动编辑 -->
