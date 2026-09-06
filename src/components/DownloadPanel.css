@@ -16,6 +16,17 @@
   margin-bottom: 14px;
 }
 
+/* 头部行允许收缩：长标题触发 task-title 省略号，而不是把折叠按钮挤出可视区 */
+.header-right {
+  flex: 1;
+  min-width: 0;
+}
+
+.status-indicator,
+.collapse-btn {
+  flex-shrink: 0;
+}
+
 .task-title {
   flex: 1;
   min-width: 0;
