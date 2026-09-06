@@ -68,6 +68,6 @@
 
 ## 相关链接
 
-- 问题反馈：在本仓库提交 Issue。
-- 更新日志：见 `CHANGELOG.md`。
-- 开发者文档（构建 / 发版 / 贡献）：见 `CONTRIBUTING.md`。
+- 问题反馈：在本仓库[提交 Issue](https://github.com/vipsunwei/vidgrab/issues)。
+- 更新日志：见 [CHANGELOG.md](./CHANGELOG.md)。
+- 开发者文档（构建 / 发版 / 贡献）：见 [CONTRIBUTING.md](./CONTRIBUTING.md)。

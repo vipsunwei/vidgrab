@@ -79,9 +79,9 @@ Conventional Commits，husky + CI 双重强制：
 
 ## 发版流程
 
-改版本号（`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` 同步）→ 打 `v*` tag 推送 →
+`pnpm release`（一键：升版本号 + 生成 CHANGELOG + 提交推送 + 打 tag 推送）→
 `.github/workflows/release.yml` 在三平台矩阵构建 → 产物进草稿 Release → 人工确认后 Publish。
-tag 必须等于 `v` + 应用版本，工作流会校验。
+tag 必须等于 `v` + 应用版本，工作流会校验。需本地安装 git-cliff（`cargo install git-cliff`）。
 
 ## 样式分层规范
 

@@ -35,22 +35,19 @@ pnpm tauri build
 
 安装包统一由 GitHub Actions 出（`.github/workflows/release.yml`），本地不必备齐三台机器：
 
-1. 改版本号：`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` 保持一致；
-2. 打 tag 推送（tag 必须等于 `v` + 应用版本，工作流会校验）：
-
-   ```bash
-   git tag v0.0.1
-   git push origin v0.0.1
-   ```
-
+1. 一键发版：`pnpm release`（或指定版本 `pnpm release 0.1.0`）——自动升版本号
+   （`tauri.conf.json` / `Cargo.toml` / `package.json`）、刷新 `CHANGELOG.md`、
+   提交推送、打 tag 并推送；
+2. tag 必须等于 `v` + 应用版本，工作流会校验；
 3. 矩阵任务并行构建：Windows NSIS / macOS dmg（Apple Silicon + Intel）/ Linux deb + AppImage；
 4. Release 正文由 [git-cliff](https://git-cliff.org) 按 `cliff.toml` 从提交记录自动生成；
 5. 产物自动挂到一个**草稿 Release**，检查附件无误后手动点 Publish 发布。
 
 ### Changelog
 
-- `CHANGELOG.md` 由 git-cliff 依据 Conventional Commits 生成，发版后手动刷新：
-  `git-cliff -o CHANGELOG.md`。
+- `CHANGELOG.md` 由 git-cliff 依据 Conventional Commits 生成；`pnpm release` 发版时
+  自动执行 `git-cliff --unreleased --tag v<版本>` 把未发布提交记为新版本，随版本号
+  一起提交，无需手动刷新（本地需安装 git-cliff：`cargo install git-cliff`）。
 - Release 工作流自动用 `git-cliff --latest --strip all` 生成草稿 Release 的正文，无需手动写。
 
 ### 内置二进制说明
