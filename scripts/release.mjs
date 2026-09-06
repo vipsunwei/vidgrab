@@ -121,6 +121,16 @@ if (dry) {
   execSync(`git-cliff --unreleased --strip all --tag v${ver}`, { cwd: root, stdio: 'inherit' })
 } else {
   run(`git-cliff -o CHANGELOG.md --unreleased --tag v${ver}`)
+  // --unreleased 模式下 git-cliff 的 previous 会误取当前版本（v0.0.2...v0.0.2），
+  // 用本地最新 tag 修正 compare 链接（CI 的 --latest 模式无此问题）
+  let prevTag = ''
+  try {
+    prevTag = git('describe --tags --abbrev=0')
+  } catch { /* 首个版本没有上一个 tag */ }
+  if (prevTag && prevTag !== `v${ver}`) {
+    const clPath = path.join(root, 'CHANGELOG.md')
+    writeFileSync(clPath, readFileSync(clPath, 'utf8').replace(`compare/v${ver}...v${ver}`, `compare/${prevTag}...v${ver}`))
+  }
 }
 
 // 5. 同步 Cargo.lock 的自身版本

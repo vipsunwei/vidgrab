@@ -19,11 +19,15 @@ body = """
 {% for commit in gc %}- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{% if commit.breaking %}**[破坏性]** {% endif %}{{ commit.message | upper_first }}
 {% endfor %}{% endif %}
 {%- endfor %}
+{%- if version and previous %}
+
+[{{ version | trim_start_matches(pat="v") }}]: https://github.com/vipsunwei/vidgrab/compare/{{ previous.version }}...{{ version }}
+{%- endif %}
 """
 # 去掉 body 首尾空白
 trim = true
 # changelog 尾部
-footer = "<!-- 由 git-cliff 自动生成，请勿手动编辑 -->"
+footer = "\n<!-- 由 git-cliff 自动生成，请勿手动编辑 -->"
 
 [git]
 # 只解析 Conventional Commits
