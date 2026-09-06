@@ -197,9 +197,12 @@ export function useParser(getCookieFile: () => string) {
 
   function selectCombo(opt: ComboOption) {
     selectedCombo.value = opt.label
+    // 默认选中与 UI 首个音频胶囊对齐：胶囊按码率档分组、每档只留 abr 最高的一条，
+    // 若用 audioTracks[0]（mp4 兼容优先），可能指向被分组挤掉的轨道，
+    // 其 format_id 不在任何胶囊里，表现为"音频没有默认选中"
     if (opt.mode === 'audio') {
       selVideo.value = ''
-      selAudio.value = audioTracks.value[0]?.format_id ?? ''
+      selAudio.value = audioCapsules.value[0]?.key ?? ''
     } else if (opt.mode === 'video') {
       // 优先含音轨的视频流（无需 merge 音频）
       const withAudio = videoTracks.value.find((f) => hasVideo(f) && hasAudio(f))
@@ -207,7 +210,7 @@ export function useParser(getCookieFile: () => string) {
       selAudio.value = ''
     } else {
       selVideo.value = pickHighestVideo(opt.maxHeight)?.format_id ?? ''
-      selAudio.value = audioTracks.value[0]?.format_id ?? ''
+      selAudio.value = audioCapsules.value[0]?.key ?? ''
     }
   }
 
