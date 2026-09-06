@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import net from 'node:net'
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 const dry = process.argv.includes('--dry-run')
@@ -32,6 +33,39 @@ const write = (rel, content) => {
 const die = (msg) => {
   console.error(`[release] ${msg}`)
   process.exit(1)
+}
+
+// ── 临时方案：推送前探测本地代理（系统代理 → 常见端口），有则走代理，无则直连 ──
+function probePort(port) {
+  return new Promise((resolve) => {
+    const s = net.connect({ port, host: '127.0.0.1', timeout: 600 })
+    s.on('connect', () => { s.destroy(); resolve(true) })
+    s.on('error', () => resolve(false))
+    s.on('timeout', () => { s.destroy(); resolve(false) })
+  })
+}
+
+async function detectProxy() {
+  // 已显式设置代理环境变量时尊重现状（git 本就会读）
+  if (process.env.HTTPS_PROXY || process.env.HTTP_PROXY) return null
+  const candidates = []
+  if (process.platform === 'win32') {
+    try {
+      const out = execSync(
+        'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer',
+        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
+      )
+      const m = out.match(/ProxyServer\s+REG_SZ\s+(\S+)/)
+      if (m) candidates.push(m[1])
+    } catch { /* 未开启系统代理 */ }
+  }
+  // 常见本地代理端口：Clash / Clash Verge / v2rayN / 通用 socksv5 / 其他
+  candidates.push('127.0.0.1:7890', '127.0.0.1:7897', '127.0.0.1:10809', '127.0.0.1:1080', '127.0.0.1:8888')
+  for (const c of candidates) {
+    const port = Number(c.split(':').pop())
+    if (port && (await probePort(port))) return `http://127.0.0.1:${port}`
+  }
+  return null
 }
 
 // 1. 工作区必须干净（预演模式放行，但提示）
@@ -95,9 +129,26 @@ run('cargo update -p vidgrab --offline', path.join(root, 'src-tauri'))
 // 6. 提交推送 + 打 tag 推送（tag 指向含 changelog 的提交）
 run(`git add ${CONF} ${TOML} src-tauri/Cargo.lock package.json CHANGELOG.md`)
 run(`git commit -m "chore: release v${ver}"`)
-run('git push')
-run(`git tag v${ver}`)
-run(`git push origin v${ver}`)
+
+// 推送前探测本地代理：有则走代理，无则直连
+const proxy = await detectProxy()
+console.log(proxy ? `[release] 检测到本地代理 ${proxy}，推送走代理` : '[release] 未检测到代理，直连推送')
+if (dry) {
+  console.log(`[dry-run] 将执行: git push / git tag v${ver} / git push origin v${ver}`)
+} else {
+  const env = proxy ? { ...process.env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy } : process.env
+  const push = (cmd) => execSync(cmd, { cwd: root, stdio: 'inherit', env })
+  try {
+    push('git push')
+    run(`git tag v${ver}`)
+    push(`git push origin v${ver}`)
+  } catch {
+    die(`git 推送失败（多半是网络）。本地提交完好，切勿重跑本脚本（会把版本再升一位），手动续作：
+  git push
+  git tag v${ver}
+  git push origin v${ver}`)
+  }
+}
 
 if (dry) {
   console.log('\n[dry-run] 预演结束：未修改任何文件、未执行任何 git 操作。')
