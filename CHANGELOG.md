@@ -3,6 +3,30 @@
 本项目的所有显著变更记录于此，格式基于 Keep a Changelog，
 分组来自 Conventional Commits 提交规范。
 
+## [0.0.3] - 2026-09-20
+
+### 🐛 问题修复
+- **downloader**: MacOS 捆绑 python 直跑 yt-dlp 源码包
+- **downloader**: All_search_dirs 补 macOS cfg，修复跨平台 dead_code
+
+### 📝 文档
+- 记录 macOS yt-dlp 捆绑 python 策略与双架构
+
+### 📦 构建
+- Yt-dlp 三平台构建期拉取，仓库不存二进制
+- Release 脚本自动安装 git-cliff（binstall 优先，cargo install 兜底）
+
+### 👥 CI/CD
+- 移除 packageManager 字段，固定 pnpm 12.4.2
+- Release 变更日志补尾随换行，修复定界符匹配
+
+### 🔧 杂项
+- Changelog 版本标题加 compare 链接
+- Changelog 插入式生成并补全版本链接
+
+
+[0.0.3]: https://github.com/vipsunwei/vidgrab/compare/v0.0.2...v0.0.3
+
 ## [0.0.2] - 2026-09-06
 
 ### ✨ 新功能
