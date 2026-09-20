@@ -21,9 +21,15 @@ pnpm run fetch:binaries  # 拉取当前平台的 yt-dlp 独立版到 src-tauri/b
 
 ## 硬性约束（违反会产生真实 bug，多数已踩过坑）
 
-1. **`src-tauri/bin/yt-dlp.exe` 必须是官方独立版**（PyInstaller 打包，约 17MB）。
-   禁止使用 pip 生成的启动器存根或 python zipapp——目标机器没有 Python，会解析失败
-   （历史上发生过：108KB 存根在开发机靠本地 Python 蒙混过关，其他机器全挂）。
+1. **yt-dlp 执行方式按平台分**：Windows/Linux 用官方独立版（PyInstaller 打包，
+   `yt-dlp.exe` 约 17MB / unix 版约 30MB+），禁止 pip 启动器存根或 python zipapp——
+   目标机器没有 Python 会解析失败（历史上 108KB 存根靠开发机本地 Python 蒙混过关，其他机器全挂）。
+   **macOS 例外**：官方 `yt-dlp_macos`（PyInstaller onefile）在本机每次启动被系统阻塞约 40s，
+   触发 60s 解析超时误杀 + 系统弹窗，故 macOS 改为**捆绑 python-build-standalone 3.12.14
+   （install_only，x86_64 / aarch64 双架构）+ yt-dlp 官方 sdist 源码包**，以 `python3 -m yt_dlp` 直跑（启动 <1s）；
+   该策略由 `downloader.rs` 的 `ytdlp_runner_candidates` 统一入口执行（捆绑 python → 系统 python3
+   → 独立二进制三级回退），`install.rs` 的 `install_macos_runtime` 负责运行时下载与 SHA256 校验。
+   三平台 yt-dlp 二进制均由 `scripts/fetch-binaries.ts` 构建期拉取，仓库不存二进制。
 2. **所有子进程 spawn 必须加 CREATE_NO_WINDOW**。用现成的 `proc::hide_window`（std）
    或 `proc::hide_window_tokio`（tokio）。release 版是 `windows_subsystem = "windows"` 的 GUI 程序，
    裸 spawn 控制台程序会弹出黑色 cmd 窗口。创建标志常量 `CREATE_NO_WINDOW` 也定义在 `proc.rs`（仅 Windows）。
