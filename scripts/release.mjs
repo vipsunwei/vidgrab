@@ -114,7 +114,22 @@ write('package.json', pkg.replace(`"version": "${cur}"`, `"version": "${ver}"`))
 try {
   execSync('git-cliff --version', { stdio: 'pipe' })
 } catch {
-  die('未安装 git-cliff，先安装：cargo install git-cliff')
+  // git-cliff 是 Rust 工具（cargo install），npm 依赖声明不了，这里做成"项目自安装"：
+  // 优先 cargo-binstall（拉预编译二进制，秒装），没有则回退 cargo install（源码编译，首次较慢）
+  console.log('[release] 未检测到 git-cliff，自动安装…')
+  let ok = false
+  try {
+    execSync('cargo binstall -y git-cliff', { stdio: 'inherit' })
+    ok = true
+  } catch { /* cargo-binstall 未安装或安装失败，回退 cargo install */ }
+  if (!ok) {
+    console.log('[release] cargo-binstall 不可用，改用 cargo install（首次编译需要几分钟）…')
+    try {
+      execSync('cargo install git-cliff', { stdio: 'inherit' })
+    } catch (e) {
+      die(`自动安装 git-cliff 失败：${e.message}。请手动执行 cargo install git-cliff 后重试`)
+    }
+  }
 }
 if (dry) {
   // 真实执行：git-cliff 只读、输出到 stdout，让用户预览本版正文
