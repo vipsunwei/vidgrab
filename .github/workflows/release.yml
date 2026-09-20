@@ -96,6 +96,7 @@ jobs:
           {
             echo 'body<<CHANGELOG_EOF'
             git-cliff --latest --strip all
+            echo
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
