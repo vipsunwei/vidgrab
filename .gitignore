@@ -32,11 +32,14 @@ src-tauri/gen/
 src-tauri/bin/ffmpeg-extract/
 src-tauri/bin/ffmpeg*
 src-tauri/bin/ffprobe.exe
-# Windows 的 yt-dlp.exe 随仓库提交（打包进安装包，目标机器无需 Python）
-# macOS/Linux 的 yt-dlp 无扩展名版本体积大（30MB+），由 scripts/fetch-binaries.ts 构建时拉取
+# 三平台 yt-dlp（含 Windows 的 yt-dlp.exe）均由 scripts/fetch-binaries.ts 构建时拉取，仓库不存二进制
 src-tauri/bin/yt-dlp
+src-tauri/bin/yt-dlp.exe
 src-tauri/bin/yt-dlp.zip
 src-tauri/bin/yt-dlp.pyz
+# macOS：捆绑 python（python-build-standalone）与 yt-dlp 源码包，由 fetch-binaries.ts 构建时拉取
+src-tauri/bin/python/
+src-tauri/bin/yt-dlp-pkg/
 # fetch 脚本生成的版本清单（本地派生态，不入库）
 src-tauri/bin/binaries.lock.json
 src-tauri/bin/binaries.sha256.json
