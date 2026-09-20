@@ -1,5 +1,4 @@
 //! 单轨执行与合并：网络错误分类、自动重试（断点续传）、ffmpeg 合并。
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -7,7 +6,7 @@ use tauri::AppHandle;
 use tokio::io::BufReader;
 use tokio::process::Command;
 
-use crate::downloader::{find_ffmpeg, push_cookie_args};
+use crate::downloader::{find_ffmpeg, push_cookie_args, YtdlpRunner};
 use crate::proc::{force_utf8_env, hide_window_tokio, kill_pid_tree, read_line_lossy};
 #[cfg(windows)]
 use crate::proc::attach_kill_on_close_job;
@@ -107,7 +106,7 @@ pub async fn delete_part_files(output_template: &str) {
 /// （每次重启 yt-dlp 都从 .part 断点接着下），重试等待期间暂停/取消随时可打断。
 #[allow(clippy::too_many_arguments)]
 pub async fn run_track_with_retry(
-    ytdlp: &PathBuf,
+    ytdlp: &YtdlpRunner,
     url: &str,
     format_id: &str,
     stage: &str,
@@ -193,7 +192,7 @@ pub async fn run_track_with_retry(
 /// seq 为本次运行代号，暂停/取消标记按它严格匹配（见 state.rs 注释）。
 #[allow(clippy::too_many_arguments)]
 pub async fn run_ytdlp_with_progress(
-    ytdlp: &PathBuf,
+    ytdlp: &YtdlpRunner,
     url: &str,
     format_id: &str,
     stage: &str,
@@ -235,9 +234,10 @@ pub async fn run_ytdlp_with_progress(
     args.push("--".into());
     args.push(url.to_string());
 
-    // unix：设置独立进程组，停止时整组击杀（PyInstaller 为父子进程结构）
+    // unix：设置独立进程组，停止时整组击杀（PyInstaller 为父子进程结构；
+    // macOS 捆绑 python 直跑同样需要进程组隔离，避免树杀落空）
     #[allow(unused_mut)]
-    let mut std_spawn = std::process::Command::new(ytdlp);
+    let mut std_spawn = ytdlp.build_command();
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

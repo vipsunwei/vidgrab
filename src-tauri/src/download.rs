@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, State};
 
-use crate::downloader::find_ytdlp;
+use crate::downloader::find_ytdlp_runner;
 use crate::meta::parse_ytdlp_output;
 use crate::naming::find_latest_in_dir;
 use crate::proc::stop_task;
@@ -72,7 +72,7 @@ pub async fn run_download_task(
     seq: u64,
 ) {
     let result: Result<(String, String), String> = (async {
-        let ytdlp = find_ytdlp()
+        let ytdlp = find_ytdlp_runner()
             .ok_or_else(|| "未找到 yt-dlp（打包版本异常）".to_string())?;
 
         let url = clean_url(&url);
@@ -365,7 +365,7 @@ pub async fn clear_task_part(
     Ok(())
 }
 
-/// 解析阶段（下载流程内）：异步跑 yt-dlp --dump-json，带 60s 超时与暂停/取消打断，
+/// 解析阶段（下载流程内）：异步跑 yt-dlp --dump-json，带 90s 超时与暂停/取消打断，
 /// PID 登记进 tasks 表供 stop_task 树杀；结束/超时/被打断后撤下登记，避免残留死 PID。
 /// 行为与前端 parse_video 对齐（spawn_blocking + timeout + kill），修 #2（同步阻塞占 tokio worker）。
 #[allow(clippy::too_many_arguments)]
@@ -404,13 +404,13 @@ async fn run_parse_stage(
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 
-    match tokio::time::timeout(std::time::Duration::from_secs(60), handle).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(90), handle).await {
         Err(_) => {
             // 超时：杀整组（unix 下 -pid 杀组）
             if let Some(pid) = tasks.lock().await.remove(task_id).flatten() {
                 crate::proc::kill_pid_tree(pid).await;
             }
-            Err("解析超时（60s），已终止解析进程".to_string())
+            Err("解析超时（90s），已终止解析进程".to_string())
         }
         Ok(joined) => {
             // 无论成败都撤下 PID 登记（避免残留 PID 让 stop_task 拿死 PID 树杀）

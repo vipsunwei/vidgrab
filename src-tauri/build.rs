@@ -18,6 +18,9 @@ fn main() {
             emit("VIDGRAB_YTDLP_WIN_SHA", &v["yt-dlp"]["win32"]);
             emit("VIDGRAB_YTDLP_MAC_SHA", &v["yt-dlp"]["darwin"]);
             emit("VIDGRAB_YTDLP_LINUX_SHA", &v["yt-dlp"]["linux"]);
+            emit("VIDGRAB_PYTHON_VERSION", &v["python"]["version"]);
+            emit("VIDGRAB_PYTHON_DARWIN_X64_SHA", &v["python"]["darwin-x64"]);
+            emit("VIDGRAB_PYTHON_DARWIN_ARM64_SHA", &v["python"]["darwin-arm64"]);
             emit("VIDGRAB_FFMPEG_VERSION", &v["ffmpeg"]["version"]);
             emit("VIDGRAB_FFMPEG_DARWIN_ARM64_SHA", &v["ffmpeg"]["darwin-arm64"]);
             emit("VIDGRAB_FFMPEG_DARWIN_X64_SHA", &v["ffmpeg"]["darwin-x64"]);

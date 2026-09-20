@@ -126,15 +126,161 @@ pub fn ytdlp_candidates() -> Vec<PathBuf> {
     found
 }
 
-/// 查找 yt-dlp（不校验可运行，解析/下载路径用，避免额外进程开销）
+/// 查找 yt-dlp（不校验可运行；仅单元测试用，生产路径统一走 find_ytdlp_runner）
+#[cfg(test)]
 pub fn find_ytdlp() -> Option<PathBuf> {
     ytdlp_candidates().into_iter().next()
 }
 
+/// yt-dlp 的执行方式。
+/// Windows/Linux：直接执行打包的独立二进制（PyInstaller onefile，自包含）；
+/// macOS：捆绑的 python 解释器直跑 yt-dlp 源码包。
+/// 背景：官方 yt-dlp_macos（PyInstaller onefile）在本机 macOS 上每次启动被系统
+/// 阻塞约 40s（实测），触发 VidGrab 解析超时误杀与系统弹窗；捆绑 python 直跑
+/// 源码包实测启动 <1s，且不依赖用户机器安装 python（yt-dlp 2026.08.19 要求
+/// Python ≥3.10，macOS 系统自带 3.9 也跑不了，故捆绑 3.12）。
+#[derive(Clone, Debug)]
+pub struct YtdlpRunner {
+    pub program: PathBuf,
+    pub pre_args: Vec<String>,
+    pub extra_env: Vec<(String, String)>,
+}
+
+impl YtdlpRunner {
+    /// 构造执行命令（含 pre_args 与 extra_env 预设）
+    pub fn build_command(&self) -> Command {
+        let mut cmd = Command::new(&self.program);
+        for a in &self.pre_args {
+            cmd.arg(a);
+        }
+        for (k, v) in &self.extra_env {
+            cmd.env(k, v);
+        }
+        cmd
+    }
+}
+
+/// 候选查找目录：exe 同目录 + 注入的资源/数据目录（与 find_bundled_binary 一致）
+fn all_search_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(exe_dir) = std::env::current_exe() {
+        if let Some(dir) = exe_dir.parent() {
+            dirs.push(dir.join("bin"));
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    dirs.extend(extra_search_dirs());
+    dirs
+}
+
+/// 在候选目录里找 yt-dlp 源码包目录（含 yt_dlp/__main__.py 的 yt-dlp-pkg）
+#[cfg(target_os = "macos")]
+fn find_ytdlp_pkg_dir() -> Option<PathBuf> {
+    for dir in all_search_dirs() {
+        let pkg = dir.join("yt-dlp-pkg").join("yt_dlp");
+        if pkg.join("__main__.py").is_file() {
+            return Some(pkg.parent()?.to_path_buf());
+        }
+    }
+    None
+}
+
+/// macOS：捆绑 python（python-build-standalone）+ 源码包 → python3 -m yt_dlp
+#[cfg(target_os = "macos")]
+fn macos_bundled_runner() -> Option<YtdlpRunner> {
+    let pkg_dir = find_ytdlp_pkg_dir()?;
+    for dir in all_search_dirs() {
+        for py in ["python/bin/python3.12", "python/bin/python3", "python/bin/python"] {
+            let py_path = dir.join(py);
+            if py_path.is_file() {
+                // 打包资源不保证保留 +x（tar/zip 解压工具可能丢权限），补一下再执行
+                ensure_exec(&py_path);
+                return Some(YtdlpRunner {
+                    program: py_path,
+                    pre_args: vec!["-m".into(), "yt_dlp".into()],
+                    // PYTHONNOUSERSITE：隔离用户 site-packages，防止本机装的
+                    // 其他 Python 包/yt-dlp 版本混入捆绑解释器（捆绑是自包含的）
+                    extra_env: vec![
+                        ("PYTHONPATH".into(), pkg_dir.to_string_lossy().into_owned()),
+                        ("PYTHONNOUSERSITE".into(), "1".into()),
+                    ],
+                });
+            }
+        }
+    }
+    None
+}
+
+/// macOS：系统 python3（CLT shim 3.9）兜底 + 找到的源码包。
+/// 注意：CLT 的 python3 是 3.9.6，跑不了 yt-dlp ≥2025.11（要求 ≥3.10）；
+/// 仅当捆绑 python 缺失（异常构建）时兜底，且只在 yt-dlp 报 Python 版本不支持
+/// 时才会被 verify 判为不可用，前端会引导走运行时安装。
+#[cfg(target_os = "macos")]
+fn macos_system_python_runner() -> Option<YtdlpRunner> {
+    let pkg_dir = find_ytdlp_pkg_dir()?;
+    let py = PathBuf::from("/usr/bin/python3");
+    if py.is_file() {
+        return Some(YtdlpRunner {
+            program: py,
+            pre_args: vec!["-m".into(), "yt_dlp".into()],
+            // 系统 python 更要用 PYTHONNOUSERSITE：用户 pip --user 装的包
+            // （如旧版 yt-dlp）不得污染源码包直跑路径
+            extra_env: vec![
+                ("PYTHONPATH".into(), pkg_dir.to_string_lossy().into_owned()),
+                ("PYTHONNOUSERSITE".into(), "1".into()),
+            ],
+        });
+    }
+    None
+}
+
+/// 当前平台可用的 yt-dlp runner（解析/下载/校验统一入口）。
+/// macOS 优先捆绑 python 直跑源码包；找不到再回退到 yt-dlp 独立二进制候选
+/// （兼容旧包资源与外部安装）。Windows/Linux 走独立二进制。
+pub fn ytdlp_runner_candidates() -> Vec<YtdlpRunner> {
+    let mut runners: Vec<YtdlpRunner> = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(r) = macos_bundled_runner() {
+            runners.push(r);
+        } else if let Some(r) = macos_system_python_runner() {
+            runners.push(r);
+        }
+    }
+    for p in ytdlp_candidates() {
+        runners.push(YtdlpRunner {
+            program: p,
+            pre_args: vec![],
+            extra_env: vec![],
+        });
+    }
+    runners
+}
+
+/// 查找 yt-dlp runner（不校验可运行，解析/下载路径用）
+pub fn find_ytdlp_runner() -> Option<YtdlpRunner> {
+    ytdlp_runner_candidates().into_iter().next()
+}
+
+/// 校验 yt-dlp runner 真实可用（能跑通 --version）
+pub fn verify_ytdlp_runner(runner: &YtdlpRunner) -> bool {
+    let mut cmd = runner.build_command();
+    cmd.arg("--version");
+    hide_window(&mut cmd);
+    matches!(
+        cmd.output(),
+        Ok(output) if output.status.success()
+    )
+}
+
 /// 查找第一个真实可运行的 yt-dlp（check_system / 安装判断用）。
 /// 能识别「文件存在但跑不起来」的坏二进制（如依赖系统 Python 的启动器存根）。
+/// 返回 program 路径（兼容旧调用方；实际执行请用 runner）。
 pub fn find_working_ytdlp() -> Option<PathBuf> {
-    ytdlp_candidates().into_iter().find(verify_ytdlp)
+    ytdlp_runner_candidates()
+        .into_iter()
+        .find(verify_ytdlp_runner)
+        .map(|r| r.program)
 }
 
 /// 查找 ffmpeg 可执行文件路径。
@@ -176,19 +322,6 @@ fn which_ytdlp() -> Result<PathBuf, ()> {
     Ok(PathBuf::from(first_line.trim()))
 }
 
-/// 校验 yt-dlp 可执行文件真实可用（能跑通 --version）。
-/// 只查文件存在会误判：例如打包进来的可能是依赖系统 Python 的启动器存根，
-/// 在没装 Python 的机器上跑不起来。check_system 用它给前端准确状态。
-pub fn verify_ytdlp(path: &PathBuf) -> bool {
-    let mut cmd = Command::new(path);
-    cmd.arg("--version");
-    hide_window(&mut cmd);
-    matches!(
-        cmd.output(),
-        Ok(output) if output.status.success()
-    )
-}
-
 /// 判断是否为可用的 Cookie 文件路径。
 /// 以 .txt 结尾且该文件真实存在——非文件路径（含旧的浏览器名）一律忽略，
 /// 避免把任意字符串当路径喂给 yt-dlp。
@@ -218,7 +351,7 @@ pub fn run_ytdlp_dump_with_pid(
     cookie: Option<&str>,
     pid_out: &std::sync::Mutex<Option<u32>>,
 ) -> Result<String, String> {
-    let path = find_ytdlp().ok_or_else(|| {
+    let runner = find_ytdlp_runner().ok_or_else(|| {
         "未找到 yt-dlp（打包版本异常）".to_string()
     })?;
 
@@ -229,7 +362,7 @@ pub fn run_ytdlp_dump_with_pid(
         return Err("请输入有效的视频链接（需以 http:// 或 https:// 开头）".to_string());
     }
 
-    let mut cmd = Command::new(&path);
+    let mut cmd = runner.build_command();
     // unix：设独立进程组（与下载路径一致），停止时 kill(-pid) 才能杀整组，
     // 否则解析进程与主程序同组，树杀落空、Python 子进程变孤儿残留（#1）
     #[cfg(unix)]
@@ -321,18 +454,20 @@ pub async fn parse_video(url: &str, cookie_source: Option<String>) -> Result<Vid
     // PID 槽：解析进程 spawn 后回传，超时时据此终止整棵进程树（避免僵尸解析进程）
     let pid_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<u32>));
     let pid_slot_for_task = pid_slot.clone();
-    // 在阻塞线程中执行同步的 yt-dlp 调用，并加 60s 超时
+    // 在阻塞线程中执行同步的 yt-dlp 调用，并加 90s 超时
+    // （PyInstaller onefile 版 yt-dlp 在本机 macOS 启动曾被系统阻塞 ~40s，
+    //  换捆绑 python 直跑后 <1s；90s 仍保留为异常网络/站点慢的兜底）
     let parse_fut = tokio::task::spawn_blocking(move || {
         run_ytdlp_dump_with_pid(&url_for_blocking, cookie.as_deref(), &pid_slot_for_task)
     });
-    match tokio::time::timeout(tokio::time::Duration::from_secs(60), parse_fut).await {
+    match tokio::time::timeout(tokio::time::Duration::from_secs(90), parse_fut).await {
         Err(_) => {
             // 超时：终止仍在运行的解析进程树（先取出 PID 并释放锁，再跨 await 杀树）
             let pid = pid_slot.lock().unwrap().take();
             if let Some(pid) = pid {
                 crate::proc::kill_pid_tree(pid).await;
             }
-            Err("解析超时（60s），已终止解析进程".to_string())
+            Err("解析超时（90s），已终止解析进程".to_string())
         }
         Ok(joined) => {
             let json = joined.map_err(|e| format!("yt-dlp 调用失败: {}", e))??;

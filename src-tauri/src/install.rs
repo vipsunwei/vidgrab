@@ -247,12 +247,193 @@ pub fn get_ytdlp_url_for_platform() -> Option<(String, String)> {
     if cfg!(target_os = "windows") {
         Some((format!("{base}/yt-dlp.exe"), "yt-dlp.exe".to_string()))
     } else if cfg!(target_os = "macos") {
-        Some((format!("{base}/yt-dlp_macos"), "yt-dlp".to_string()))
+        // macOS：官方 sdist 源码包（由捆绑 python 直跑，见 downloader.rs）。
+        // 不再使用 yt-dlp_macos（PyInstaller onefile）——其在本机 macOS 上每次
+        // 启动被系统阻塞约 40s，触发解析超时误杀与系统弹窗
+        Some((format!("{base}/yt-dlp.tar.gz"), "yt-dlp.tar.gz".to_string()))
     } else {
         // 注意用独立版 yt-dlp_linux（PyInstaller 打包，无需 Python）；
         // release 里的 `yt-dlp` 资产是 python zipapp，裸机器跑不起来
         Some((format!("{base}/yt-dlp_linux"), "yt-dlp".to_string()))
     }
+}
+
+/// macOS：捆绑 python（python-build-standalone install_only）下载地址。
+/// 版本与 SHA 由构建期注入（fetch-binaries 生成，build.rs 注入）。
+#[cfg(target_os = "macos")]
+pub fn get_python_url_for_platform() -> Option<(String, String)> {
+    let ver = option_env!("VIDGRAB_PYTHON_VERSION")?;
+    if ver.is_empty() {
+        return None;
+    }
+    let (py_version, tag) = ver.split_once('+')?;
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
+    let file = format!("cpython-{py_version}+{tag}-{arch}-apple-darwin-install_only.tar.gz");
+    Some((
+        format!("https://github.com/astral-sh/python-build-standalone/releases/download/{tag}/{file}"),
+        file,
+    ))
+}
+
+/// macOS：捆绑 python 压缩包的期望 SHA256
+#[cfg(target_os = "macos")]
+fn expected_python_sha() -> Option<&'static str> {
+    if cfg!(target_arch = "aarch64") {
+        option_env!("VIDGRAB_PYTHON_DARWIN_ARM64_SHA")
+    } else {
+        option_env!("VIDGRAB_PYTHON_DARWIN_X64_SHA")
+    }
+}
+
+/// 通用下载：写文件并推送进度事件（macOS 运行时安装用）
+#[cfg(target_os = "macos")]
+async fn download_to(
+    app: &AppHandle,
+    url: &str,
+    dest: &Path,
+    total_fallback: u64,
+    event: &str,
+) -> Result<(), String> {
+    let total_bytes = fetch_content_length(url).await.unwrap_or(total_fallback);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("下载失败: {}", e))?;
+    let mut file = std::fs::File::create(dest)
+        .map_err(|e| format!("创建下载文件失败: {}", e))?;
+    let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
+    while let Some(chunk) = futures_util::stream::StreamExt::next(&mut stream).await {
+        let chunk = chunk.map_err(|e| format!("下载流失败: {}", e))?;
+        downloaded += chunk.len() as u64;
+        let progress = if total_bytes > 0 {
+            (downloaded as f64 / total_bytes as f64 * 100.0).min(100.0)
+        } else {
+            0.0
+        };
+        let _ = app.emit(
+            event,
+            FFmpegInstallProgress {
+                progress,
+                speed: format!("{:.1} MB", downloaded as f64 / 1_048_576.0),
+                downloaded_mb: downloaded as f64 / 1_048_576.0,
+                total_mb: total_bytes as f64 / 1_048_576.0,
+                stage: "downloading".to_string(),
+            },
+        );
+        std::io::Write::write_all(&mut file, &chunk)
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+    }
+    std::io::Write::flush(&mut file).map_err(|e| format!("刷新文件失败: {}", e))?;
+    let _ = app.emit(
+        event,
+        FFmpegInstallProgress {
+            progress: 100.0,
+            speed: "完成".to_string(),
+            downloaded_mb: 0.0,
+            total_mb: 0.0,
+            stage: "extracting".to_string(),
+        },
+    );
+    Ok(())
+}
+
+/// 用系统 tar 解压 .tar.gz 到 dest_dir（macOS/Linux 自带 tar）
+#[cfg(target_os = "macos")]
+fn extract_tar_gz(tar_gz: &Path, dest_dir: &Path) -> Result<(), String> {
+    let status = std::process::Command::new("tar")
+        .arg("xzf")
+        .arg(tar_gz)
+        .arg("-C")
+        .arg(dest_dir)
+        .status()
+        .map_err(|e| format!("调用 tar 失败: {}", e))?;
+    if !status.success() {
+        return Err(format!("解压失败（tar exit {status}）"));
+    }
+    Ok(())
+}
+
+/// macOS：运行时兜底安装 = 捆绑 python + yt-dlp 源码包（与构建期 fetch-binaries 同源同版本）
+#[cfg(target_os = "macos")]
+async fn install_macos_runtime(app: &AppHandle, dst_dir: &Path) -> Result<(), String> {
+    let tmp_dir = std::env::temp_dir().join("vidgrab-ytdlp-install");
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir)
+        .map_err(|e| format!("创建临时目录失败: {}", e))?;
+
+    // 1) python-build-standalone → dst_dir/python/
+    let Some((py_url, py_file)) = get_python_url_for_platform() else {
+        return Err("构建信息缺失（未注入 python 版本/哈希），无法安全下载安装".to_string());
+    };
+    let py_tmp = tmp_dir.join(&py_file);
+    download_to(app, &py_url, &py_tmp, 25_000_000, "ytdlp-install-progress").await?;
+    if let Some(exp) = expected_python_sha() {
+        let actual = sha256_of(&py_tmp)?;
+        if actual.to_lowercase() != exp.to_lowercase() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(format!(
+                "python 校验失败：哈希不匹配（期望 {exp}，实际 {actual}），可能下载被篡改"
+            ));
+        }
+    }
+    let py_dst = dst_dir.join("python");
+    let _ = std::fs::remove_dir_all(&py_dst);
+    extract_tar_gz(&py_tmp, dst_dir)?; // 压缩包顶层就是 python/
+    if !py_dst.join("bin").is_dir() {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err("python 解压结构异常（缺少 python/bin）".to_string());
+    }
+
+    // 2) yt-dlp sdist → dst_dir/yt-dlp-pkg/yt_dlp/
+    let Some((url, name)) = get_ytdlp_url_for_platform() else {
+        return Err("不支持的操作系统".to_string());
+    };
+    let sdist_tmp = tmp_dir.join(&name);
+    download_to(app, &url, &sdist_tmp, 16_000_000, "ytdlp-install-progress").await?;
+    if let Some(exp) = expected_ytdlp_sha() {
+        let actual = sha256_of(&sdist_tmp)?;
+        if actual.to_lowercase() != exp.to_lowercase() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(format!(
+                "yt-dlp 校验失败：哈希不匹配（期望 {exp}，实际 {actual}），可能下载被篡改"
+            ));
+        }
+    }
+    extract_tar_gz(&sdist_tmp, &tmp_dir)?; // sdist 顶层是 yt-dlp/
+    let src_pkg = tmp_dir.join("yt-dlp").join("yt_dlp");
+    if !src_pkg.join("__main__.py").is_file() {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err("yt-dlp 源码包结构异常（缺少 yt_dlp/__main__.py）".to_string());
+    }
+    let pkg_dst = dst_dir.join("yt-dlp-pkg");
+    let _ = std::fs::remove_dir_all(&pkg_dst);
+    std::fs::create_dir_all(&pkg_dst)
+        .map_err(|e| format!("创建安装目录失败: {}", e))?;
+    std::fs::rename(&src_pkg, pkg_dst.join("yt_dlp"))
+        .map_err(|e| format!("移动 yt_dlp 包失败: {}", e))?;
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let _ = app.emit(
+        "ytdlp-install-progress",
+        FFmpegInstallProgress {
+            progress: 100.0,
+            speed: "".to_string(),
+            downloaded_mb: 0.0,
+            total_mb: 0.0,
+            stage: "done".to_string(),
+        },
+    );
+    Ok(())
 }
 
 
@@ -263,11 +444,29 @@ pub async fn install_ytdlp(app: tauri::AppHandle) -> Result<String, String> {
         return Ok("already_installed".to_string());
     }
 
+    let dst_dir = bin_install_dir(&app)?;
+
+    // macOS：捆绑 python + yt-dlp 源码包（绕开 PyInstaller onefile 慢启动）
+    #[cfg(target_os = "macos")]
+    let result = {
+        install_macos_runtime(&app, &dst_dir).await?;
+        format!("已安装到 {}", dst_dir.display())
+    };
+    #[cfg(not(target_os = "macos"))]
+    let result = {
+        install_ytdlp_download(&app, &dst_dir).await?
+    };
+
+    Ok(result)
+}
+
+/// 非 macOS：下载官方独立版二进制（Windows 的 exe / Linux 的 yt-dlp_linux）
+#[cfg(not(target_os = "macos"))]
+async fn install_ytdlp_download(app: &AppHandle, dst_dir: &Path) -> Result<String, String> {
     let Some((url, target_name)) = get_ytdlp_url_for_platform() else {
         return Err("不支持的操作系统".to_string());
     };
 
-    let dst_dir = bin_install_dir(&app)?;
     let dst = dst_dir.join(&target_name);
 
     let tmp_dir = std::env::temp_dir().join("vidgrab-ytdlp-install");
