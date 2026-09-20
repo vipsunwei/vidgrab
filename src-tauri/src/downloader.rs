@@ -161,6 +161,9 @@ impl YtdlpRunner {
 }
 
 /// 候选查找目录：exe 同目录 + 注入的资源/数据目录（与 find_bundled_binary 一致）
+/// 仅 macOS 的捆绑 python 策略使用（find_ytdlp_pkg_dir / macos_bundled_runner），
+/// 不带 cfg 会在 Windows/Linux 编译时触发 dead_code。
+#[cfg(target_os = "macos")]
 fn all_search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Ok(exe_dir) = std::env::current_exe() {
