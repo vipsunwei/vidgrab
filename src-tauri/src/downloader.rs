@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
+use tauri::AppHandle;
+
+use crate::cookies;
 use crate::meta::{fetch_thumbnail_data_uri, parse_ytdlp_output, VideoInfo};
 use crate::proc::hide_window;
 use crate::url::clean_url;
@@ -447,12 +450,22 @@ pub async fn check_system() -> SystemStatus {
 }
 
 #[tauri::command]
-pub async fn parse_video(url: &str, cookie_source: Option<String>) -> Result<VideoInfo, String> {
+pub async fn parse_video(
+    url: &str,
+    cookie_source: Option<String>,
+    app: AppHandle,
+) -> Result<VideoInfo, String> {
     if url.is_empty() {
         return Err("URL 不能为空".to_string());
     }
     let url = url.to_string();
-    let cookie = cookie_source.clone();
+    // 现场复制 cookie 到运行时副本：yt-dlp 会写回 --cookies 文件，
+    // 直接传用户存储会被污染（分组标记丢失、登录态被匿名 session 覆盖），
+    // 见 cookies::prepare_cookie_runtime。
+    let cookie = match &cookie_source {
+        Some(src) if !src.is_empty() => Some(cookies::prepare_cookie_runtime(&app, src)?),
+        _ => None,
+    };
     let url_for_blocking = url.clone();
     // PID 槽：解析进程 spawn 后回传，超时时据此终止整棵进程树（避免僵尸解析进程）
     let pid_slot = std::sync::Arc::new(std::sync::Mutex::new(None::<u32>));

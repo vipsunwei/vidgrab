@@ -194,6 +194,26 @@ fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("cookies.txt"))
 }
 
+/// 把 source cookie 文件复制为运行时副本（app_data/cookies_runtime.txt），返回其路径。
+/// yt-dlp 的 --cookies 会在运行后把该文件整个写回（换成其运行期 session cookie），
+/// 若直接传用户存储 cookies.txt，分组标记与登录态 cookie 都会被冲掉——
+/// 表现为：重开 app 后已添加的 Cookie 组消失、解析回到匿名 bot check。
+/// 因此解析/下载命令在把 cookie 传给 yt-dlp 前必须调用本函数，用户存储保持纯净。
+/// source 为空时返回空串（调用方跳过 --cookies）。
+pub fn prepare_cookie_runtime(app: &AppHandle, source: &str) -> Result<String, String> {
+    if source.is_empty() {
+        return Ok(String::new());
+    }
+    let text = read_text(source).map_err(|e| format!("读取 Cookie 文件失败: {}", e))?;
+    let tmp = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?
+        .join("cookies_runtime.txt");
+    std::fs::write(&tmp, text).map_err(|e| format!("写入运行时 Cookie 副本失败: {}", e))?;
+    Ok(tmp.to_string_lossy().to_string())
+}
+
 /// 固定存储的概览：已启用的站点组。groups 非空即视为已启用。
 #[derive(Serialize)]
 pub struct CookieStoreStatus {
@@ -201,6 +221,8 @@ pub struct CookieStoreStatus {
 }
 
 /// 固定存储的实际路径，供前端作为 --cookies 参数值。
+/// 注意：后端命令（parse_video / start_download）内部会现场复制到运行时副本，
+/// 前端直接传本路径即可，用户存储不会被 yt-dlp 写回污染。
 #[tauri::command]
 pub async fn cookie_store_path(app: AppHandle) -> Result<String, String> {
     store_path(&app).map(|p| p.to_string_lossy().to_string())

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, State};
 
+use crate::cookies;
 use crate::downloader::find_ytdlp_runner;
 use crate::meta::parse_ytdlp_output;
 use crate::naming::find_latest_in_dir;
@@ -34,6 +35,16 @@ pub async fn start_download(
     task_seqs: State<'_, TaskSeqs>,
     task_outputs: State<'_, TaskOutputs>,
 ) -> Result<(), String> {
+    // 现场复制 cookie 到运行时副本（防 yt-dlp 写回污染用户存储，见 cookies::prepare_cookie_runtime）
+    let cookie_prepared = match &cookie_source {
+        Some(src) if !src.is_empty() => cookies::prepare_cookie_runtime(&app, src)?,
+        _ => String::new(),
+    };
+    let cookie_final = if cookie_prepared.is_empty() {
+        None
+    } else {
+        Some(cookie_prepared)
+    };
     let app_c = app.clone();
     let tasks_c = tasks.inner().clone();
     let cancelling_c = CancelSet(cancelling.inner().0.clone());
@@ -45,7 +56,7 @@ pub async fn start_download(
     seqs_c.0.lock().unwrap().insert(task_id.clone(), seq);
     tokio::spawn(async move {
         run_download_task(
-            task_id, url, format_ids, output_dir, output_name, quality_tag, cookie_source,
+            task_id, url, format_ids, output_dir, output_name, quality_tag, cookie_final,
             app_c, tasks_c, cancelling_c, pausing_c, seqs_c, outputs_c, seq,
         )
         .await;
