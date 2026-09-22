@@ -2,6 +2,7 @@
   <div class="url-card">
     <span class="i-ph-link-bold url-icon" />
     <input
+      ref="inputRef"
       v-model="url"
       class="url-input"
       type="text"
@@ -9,6 +10,15 @@
       :disabled="loading"
       @keydown.enter="emit('parse')"
     />
+    <button
+      v-if="url && !loading"
+      class="clear-btn"
+      type="button"
+      title="清除地址"
+      @click="clearUrl"
+    >
+      <span class="i-ph-x-bold" />
+    </button>
     <button
       class="parse-btn"
       :disabled="!url || loading"
@@ -22,9 +32,18 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
 const url = defineModel<string>({ required: true });
 defineProps<{ loading: boolean }>();
 const emit = defineEmits<{ parse: [] }>();
+
+// 清除后保持焦点：清空地址后用户通常要立即粘贴新链接
+const inputRef = ref<HTMLInputElement | null>(null);
+function clearUrl() {
+  url.value = '';
+  inputRef.value?.focus();
+}
 </script>
 
 <style scoped>
@@ -68,6 +87,27 @@ const emit = defineEmits<{ parse: [] }>();
 }
 .url-input:disabled {
   opacity: 0.6;
+}
+
+.clear-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--v-radius-xs);
+  background: transparent;
+  color: var(--v-text-tertiary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--v-transition);
+}
+.clear-btn:hover {
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--v-text);
 }
 
 .parse-btn {
