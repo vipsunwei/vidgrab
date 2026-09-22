@@ -3,6 +3,17 @@
 本项目的所有显著变更记录于此，格式基于 Keep a Changelog，
 分组来自 Conventional Commits 提交规范。
 
+## [0.0.4] - 2026-09-22
+
+### ✨ 新功能
+- **ui**: 解析地址栏增加一键清除按钮
+
+### 🐛 问题修复
+- **cookies**: 解析/下载前复制 cookie 到运行时副本，防 yt-dlp 写回污染用户存储
+
+
+[0.0.4]: https://github.com/vipsunwei/vidgrab/compare/v0.0.3...v0.0.4
+
 ## [0.0.3] - 2026-09-20
 
 ### 🐛 问题修复
